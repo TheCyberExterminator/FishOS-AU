@@ -122,7 +122,7 @@
     </div>
     <div id="staleBar" class="hidden chip rounded-xl px-3 py-2 text-[12px] text-muted flex items-center gap-2"></div>
 
-    <div class="glass border border-line rounded-2xl p-4 fade-in">
+    <div id="heroCard" class="glass border border-line rounded-2xl p-4 fade-in select-none">
       <div class="flex items-center gap-4">
         <div class="relative w-[112px] h-[112px] shrink-0">
           <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
@@ -323,6 +323,7 @@
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const num=(v,d)=>(typeof v==='number'&&isFinite(v))?v:d; // safe number with default
 const round=(v,d=0)=>{const p=10**d;return Math.round(v*p)/p;};
 const fmtTime=d=>d.toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'});
 const compass=deg=>['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(((deg%360)/22.5))%16];
@@ -933,8 +934,17 @@ function nearestHourIdx(times,now){let best=0,bd=Infinity;for(let i=0;i<times.le
 function solunarStrength(now,sol){let best=0;const consider=[...sol.majors.map(p=>({...p,w:1})),...sol.minors.map(p=>({...p,w:0.6}))];
   for(const p of consider){const dt=Math.abs(now-p.t)/60000,half=p.len/2;if(dt<=half){const c=1-(dt/half);best=Math.max(best,p.w*(0.5+0.5*c));}}return clamp(0.18+best,0,1);}
 
+/* synthesise neutral weather arrays so the score can still run with no/partial weather */
+function synthDaily(lat,lon){const o={time:[],weather_code:[],temperature_2m_max:[],temperature_2m_min:[],sunrise:[],sunset:[],wind_speed_10m_max:[],wind_gusts_10m_max:[],wind_direction_10m_dominant:[],precipitation_sum:[],precipitation_probability_max:[],uv_index_max:[]};const b=new Date();b.setHours(0,0,0,0);for(let i=0;i<7;i++){const dt=new Date(b.getTime()+i*86400000),st=sunTimes(dt,lat,lon);o.time.push(dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'));o.weather_code.push(2);o.temperature_2m_max.push(20);o.temperature_2m_min.push(12);o.sunrise.push(st.sunrise.toISOString());o.sunset.push(st.sunset.toISOString());o.wind_speed_10m_max.push(0);o.wind_gusts_10m_max.push(0);o.wind_direction_10m_dominant.push(0);o.precipitation_sum.push(0);o.precipitation_probability_max.push(0);o.uv_index_max.push(null);}return o;}
+function synthHourly(){const o={time:[],surface_pressure:[],wind_speed_10m:[],wind_direction_10m:[],wind_gusts_10m:[],temperature_2m:[],weather_code:[],precipitation_probability:[]};const b=new Date();b.setMinutes(0,0,0);for(let i=0;i<48;i++){const t=new Date(b.getTime()+i*3600000);o.time.push(t.toISOString());o.surface_pressure.push(1015);o.wind_speed_10m.push(0);o.wind_direction_10m.push(0);o.wind_gusts_10m.push(0);o.temperature_2m.push(18);o.weather_code.push(2);o.precipitation_probability.push(0);}return o;}
 function process(lat,lon,f,m,tideRes){
-  const now=new Date(),cur=f.current,moon=moonInfo(now),sol=solunarPeriods(now,lat,lon);
+  const now=new Date(),moon=moonInfo(now),sol=solunarPeriods(now,lat,lon);
+  // --- defensive: normalise weather so a missing/partial field never breaks the score ---
+  f=f||{};const C0=f.current||{};
+  const cur={temperature_2m:num(C0.temperature_2m,18),apparent_temperature:num(C0.apparent_temperature,num(C0.temperature_2m,18)),relative_humidity_2m:num(C0.relative_humidity_2m,60),is_day:(C0.is_day==null?1:C0.is_day),precipitation:num(C0.precipitation,0),weather_code:num(C0.weather_code,2),surface_pressure:num(C0.surface_pressure,1015),wind_speed_10m:num(C0.wind_speed_10m,0),wind_direction_10m:num(C0.wind_direction_10m,0),wind_gusts_10m:num(C0.wind_gusts_10m,num(C0.wind_speed_10m,0))};
+  if(!f.daily||!Array.isArray(f.daily.time)||!f.daily.time.length)f.daily=synthDaily(lat,lon);
+  if(!f.hourly||!Array.isArray(f.hourly.time)||!f.hourly.time.length)f.hourly=synthHourly();
+  const weatherKnown=!!(C0&&C0.weather_code!=null);
   // TIDES: live API extrema first; otherwise the offline harmonic engine (always works, real heights)
   let tide;
   if(tideRes&&extremaValid(tideRes.extrema)){tide=buildTide(tideRes.extrema,now,true,tideRes.source);}
@@ -991,8 +1001,11 @@ function process(lat,lon,f,m,tideRes){
     ds=Math.round(clamp(ds,5,98));
     return{date:new Date(t+'T00:00:00'),code,ds,tmax:f.daily.temperature_2m_max[i],tmin:f.daily.temperature_2m_min[i],wind:wsd,gust:f.daily.wind_gusts_10m_max[i],windDir:f.daily.wind_direction_10m_dominant[i],rainP:f.daily.precipitation_probability_max[i],uv:f.daily.uv_index_max?f.daily.uv_index_max[i]:null,sunrise:new Date(f.daily.sunrise[i]),sunset:new Date(f.daily.sunset[i]),moon:dM};
   });
-  return{lat,lon,now:now.getTime(),cur,moon,sol,tide,tideSeries48,score,factors,speciesScored,top3,bestBaits,safety,daily,wave,wavePeriod,waterTemp,pressTrend,pTrendVal,sunrise:sr.getTime(),sunset:ss.getTime(),isDawnDusk,timeBucket,hourly:f.hourly,fetchedAt:Date.now()};
+  const dbg={solScore:round(solScore,3),isDawnDusk,wspd:round(wspd,1),pressTrend,wave,timeBucket,weatherKnown,baseScore:50};
+  return{lat,lon,now:now.getTime(),cur,moon,sol,tide,tideSeries48,score,factors,speciesScored,top3,bestBaits,safety,daily,wave,wavePeriod,waterTemp,pressTrend,pTrendVal,sunrise:sr.getTime(),sunset:ss.getTime(),isDawnDusk,timeBucket,hourly:f.hourly,weatherKnown,dbg,fetchedAt:Date.now()};
 }
+/* engine-only reduced-confidence estimate when no live weather is reachable */
+function buildEstimate(lat,lon){try{const f={current:{},daily:synthDaily(lat,lon),hourly:synthHourly()};const d=process(lat,lon,f,null,null);d.estimate=true;d.src='Estimate (moon + tide engine)';return d;}catch(_){return null;}}
 
 /* ============== RENDER ============== */
 function scoreColor(s){return s>=70?'#34d399':s>=45?'#f59e0b':'#ef4444';}
@@ -1007,28 +1020,29 @@ function render(d,stale){
   const ut=$('#updatedTxt');if(ut)ut.textContent=(stale?'Saved ':'Updated ')+ago(d.fetchedAt);
   // per-module status chips — shows exactly which part is live vs failed/estimated
   const ds=$('#dataStatus');
-  if(ds){const st=d.status||{};
+  if(ds){const st=d.status||{};const wx=d.weatherKnown!==false;
     const chip=(label,ok,note,warn)=>'<span class="chip rounded-full px-2 py-0.5 text-[10px] border '+(ok?'border-brand/40 text-brand':warn?'border-warn/40 text-warn':'border-danger/40 text-danger')+'">'+(ok?'✓':warn?'⚙':'✕')+' '+label+(note?' · '+esc(note):'')+'</span>';
     const tideLive=st.tide&&st.tide!=='engine';
     ds.innerHTML=
-      chip('Weather',true,(d.src||'').replace(' (backup)',''))+
-      chip('Wind',true,'')+
+      chip('Weather',wx,wx?(d.src||'').replace(' (backup)',''):'estimate',!wx)+
+      chip('Wind',wx,wx?'':'estimate',!wx)+
       chip('Tides',tideLive,tideLive?String(st.tide).replace(' (cached)',''):'on-device engine',!tideLive)+
       chip('Swell',!!st.swell,st.swell?'':'no data',!st.swell);
   }
 
   const ring=$('#scoreRing'),C=2*Math.PI*52;ring.style.strokeDasharray=C;ring.style.strokeDashoffset=C*(1-d.score/100);ring.style.stroke=scoreColor(d.score);
+  const wx=d.weatherKnown!==false; // false when running on the engine estimate (no live weather)
   animateNum($('#scoreNum'),d.score);
-  $('#scoreLabel').textContent=scoreWord(d.score);
-  $('#scoreSub').textContent=seasonName(now.getMonth()+1)+' · '+fmtTime(now)+' · '+(d.cur.is_day?'daylight':'after dark');
+  $('#scoreLabel').textContent=d.estimate?'Estimate — '+scoreWord(d.score):scoreWord(d.score);
+  $('#scoreSub').textContent=seasonName(now.getMonth()+1)+' · '+fmtTime(now)+' · '+(wx?(d.cur.is_day?'daylight':'after dark'):'moon + tide only');
   $('#scoreFactors').innerHTML=d.factors.slice(0,4).map(([t,k])=>{const c=k==='good'?'text-brand border-brand/40':k==='warn'?'text-warn border-warn/40':k==='bad'?'text-danger border-danger/40':'text-muted border-line';return '<span class="chip '+c+' rounded-full px-2 py-0.5 text-[11px] border">'+t+'</span>';}).join('');
 
-  $('#windVal').textContent=windDisp(d.cur.wind_speed_10m);$('#windUnit').textContent=windUnitLabel();
-  $('#windDir').textContent=compass(d.cur.wind_direction_10m)+' '+round(d.cur.wind_direction_10m)+'°';
+  $('#windVal').textContent=wx?windDisp(d.cur.wind_speed_10m):'—';$('#windUnit').textContent=windUnitLabel();
+  $('#windDir').textContent=wx?(compass(d.cur.wind_direction_10m)+' '+round(d.cur.wind_direction_10m)+'°'):'no live wind';
   $('#windArrow').style.transform='rotate('+(d.cur.wind_direction_10m+180)+'deg)';
-  $('#windGust').textContent='gust '+windDisp(d.cur.wind_gusts_10m);
-  $('#temp').textContent=round(d.cur.temperature_2m);
-  const [desc,em]=wmo(d.cur.weather_code);$('#wxEmoji').textContent=em;$('#wxDesc').textContent=desc+' · feels '+round(d.cur.apparent_temperature)+'°';
+  $('#windGust').textContent=wx?('gust '+windDisp(d.cur.wind_gusts_10m)):'';
+  $('#temp').textContent=wx?round(d.cur.temperature_2m):'—';
+  const [desc,em]=wmo(d.cur.weather_code);$('#wxEmoji').textContent=wx?em:'❓';$('#wxDesc').textContent=wx?(desc+' · feels '+round(d.cur.apparent_temperature)+'°'):'no live weather';
   $('#wave').textContent=d.wave!=null?round(d.wave,1):'—';$('#wavePeriod').textContent=d.wavePeriod!=null?('period '+round(d.wavePeriod)+'s'):'no marine data here';
   $('#moonEmoji').textContent=d.moon.emoji;$('#moonIllum').textContent=d.moon.illumPct;$('#moonPhase').textContent=d.moon.phase;
   $('#pressure').textContent=round(d.cur.surface_pressure);$('#pressTrend').textContent=d.pressTrend+(d.pTrendVal?(' '+(d.pTrendVal>0?'+':'')+round(d.pTrendVal,1)):'');
@@ -1291,30 +1305,33 @@ function fetchNow(){
   fetchConditions(loc.lat,loc.lon).then(d=>{if(seq!==_loadSeq)return;render(d,false);LS.set(condKey(loc),d);if(d.src&&d.src!=='Open-Meteo')toast('Loaded · '+d.src);else toast('Updated');if(STATE.map)updateMapForLocation(loc);})
     .catch(()=>{if(seq!==_loadSeq)return;const c=LS.get(condKey(loc),null);if(ut)ut.textContent=c?('Saved '+ago(c.fetchedAt)+' · refresh failed'):'Refresh failed';toast('Couldn’t reach any weather source — try again or switch vendor in ⚙️');});
 }
+function flagStale(msg,loc){const sb=$('#staleBar');if(!sb)return;sb.classList.remove('hidden');sb.innerHTML='<span class="w-1.5 h-1.5 rounded-full bg-warn"></span>'+msg+' <button id="retryBtn" class="text-brand2 underline ml-1">Retry</button>';const rb=$('#retryBtn');if(rb)rb.addEventListener('click',()=>loadLocation(loc));}
+function lastKnownConditions(){let best=null;try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.indexOf('fishos_cond_')===0){const v=LS.get(k,null);if(v&&v.fetchedAt&&(!best||v.fetchedAt>best.fetchedAt))best=v;}}}catch(_){}return best;}
 let _loadSeq=0;
 async function loadLocation(loc){
   const seq=++_loadSeq; // guard against out-of-order responses when switching spots fast
   STATE.loc=loc;$('#locName').textContent=loc.name;$('#speciesLoc').textContent=loc.name;renderFav();renderNearSpots();
   const cached=LS.get(condKey(loc),null);
-  if(cached){render(cached,true);}else setLoadingHero();
+  // Show *something* immediately: this spot's cache, else keep the previous full render, else first-run loading.
+  if(cached)render(cached,true);
+  else if(STATE.data){const ut=$('#updatedTxt');if(ut)ut.textContent='Loading '+loc.name+'…';}
+  else setLoadingHero();
   try{
     const d=await fetchConditions(loc.lat,loc.lon);
     if(seq!==_loadSeq)return; // a newer load started — ignore this stale result
-    render(d,false);LS.set(condKey(loc),d);saveLast(loc);
+    render(d,false);LS.set(condKey(loc),d);LS.set('fishos_lastgood',{lat:loc.lat,lon:loc.lon});saveLast(loc);
     if(d.src&&d.src!=='Open-Meteo')$('#scoreSub').textContent+=' · via '+d.src;
     if(STATE.map)updateMapForLocation(loc);
   }catch(e){
     if(seq!==_loadSeq)return;
-    // Non-destructive: if we already have data on screen (cached or freshly rendered), keep it —
-    // just flag the refresh failure in the status bar. Only show the full hero error if we truly have nothing.
-    const haveData = cached || (STATE.data && (Date.now()-(STATE.data.fetchedAt||0) < 6*60000));
-    if(haveData){
-      const sb=$('#staleBar');sb.classList.remove('hidden');
-      sb.innerHTML='<span class="w-1.5 h-1.5 rounded-full bg-danger"></span>Couldn’t refresh — showing last good data. <button id="retryBtn" class="text-brand2 underline ml-1">Retry</button>';
-      const rb=$('#retryBtn');if(rb)rb.addEventListener('click',()=>loadLocation(loc));
-    }else{
-      $('#scoreLabel').textContent='Couldn’t load conditions';$('#scoreSub').textContent='Tap retry — check your connection';$('#scoreFactors').innerHTML='<button id="retryBtn2" class="chip rounded-full px-3 py-1 text-[12px] text-brand2">Retry</button>';const rb=$('#retryBtn2');if(rb)rb.addEventListener('click',()=>loadLocation(loc));
-    }
+    // ===== SCORECARD FALLBACK CHAIN — must never bare-fail =====
+    if(cached){ render(cached,true); flagStale('Couldn’t refresh — showing saved conditions ('+ago(cached.fetchedAt)+')',loc); return; }
+    const last=lastKnownConditions();
+    if(last){ render(last,true); flagStale('No live data for '+esc(loc.name)+' — showing last-known conditions',loc); return; }
+    const est=buildEstimate(loc.lat,loc.lon); // engine-only reduced score (moon + solunar + tide)
+    if(est){ render(est,false); flagStale('No live weather reached — estimated from moon, solunar &amp; the tide engine',loc); return; }
+    // truly nothing (first run, fully offline, engine threw): honest message, not a crash
+    $('#scoreNum').textContent='–';$('#scoreLabel').textContent='No live data available';$('#scoreSub').textContent='Offline — pull to refresh when you have signal';$('#scoreFactors').innerHTML='<button id="retryBtn2" class="chip rounded-full px-3 py-1 text-[12px] text-brand2">Retry</button>';const rb=$('#retryBtn2');if(rb)rb.addEventListener('click',()=>loadLocation(loc));
   }
 }
 function setLoadingHero(){$('#scoreNum').textContent='–';$('#scoreLabel').textContent='Loading conditions…';$('#scoreSub').textContent='Pulling live marine data';$('#scoreFactors').innerHTML='<span class="chip rounded-full px-2 py-0.5 text-[11px] text-muted pulse">analysing…</span>';}
@@ -1432,6 +1449,53 @@ function openTideInfo(){
     +'<p class="text-[13px] text-amber-100 mt-3">⚠️ Even live predictions don\'t include wind setup or storm surge. Before fishing a low rock ledge, breakwall, or wading a flat, check the Bureau of Meteorology tide predictions. Conditions and your safety come first.</p>'
     +'<button onclick="closeSheet()" class="w-full bg-brand text-ink font-bold rounded-xl py-3 mt-4">Got it</button>');}
 
+/* ============== DEBUG MODE (?debug=true OR long-press the score) ============== */
+async function openDebug(){
+  const d=STATE.data,loc=STATE.loc;
+  const tag=(s)=>{const m={live:'text-brand border-brand/40',cache:'text-brand2 border-brand2/40',engine:'text-warn border-warn/40',estimate:'text-warn border-warn/40',failed:'text-danger border-danger/40',n:'text-muted border-line'};const c=m[s]||m.n;return '<span class="chip rounded px-1.5 py-0.5 text-[10px] border '+c+'">'+s.toUpperCase()+'</span>';};
+  const row=(k,v,t)=>'<div class="flex items-center justify-between gap-2 py-1 border-b border-line/60"><span class="text-[12px] text-muted">'+k+'</span><span class="text-[12px] text-right">'+(t?t+' ':'')+v+'</span></div>';
+  let h='<div class="flex items-center justify-between mb-2"><h2 class="font-bold text-lg">🐞 Debug</h2><button id="dbgTest" class="chip rounded-lg px-3 py-1.5 text-[12px] text-brand2">Ping sources</button></div>';
+  if(!d){h+='<div class="text-[13px] text-muted">No conditions loaded yet.</div>';}
+  else{
+    const st=d.status||{},dbg=d.dbg||{};
+    const tideTag=d.tide.real?(/cached/.test(d.tide.source||'')?'cache':'live'):'engine';
+    h+='<div class="chip rounded-xl p-3 mb-2"><div class="font-semibold text-[13px] mb-1">Data sources</div>'
+      +row('Weather + Wind',esc((d.src||'?')),tag(d.weatherKnown!==false?(/cached/.test(d.src||'')?'cache':(d.estimate?'estimate':'live')):'estimate'))
+      +row('Tide',esc(d.tide.source||'?'),tag(tideTag))
+      +row('Swell / SST',st.swell?'ok':'none',tag(st.swell?'live':'failed'))
+      +row('Moon',d.moon.phase+' '+d.moon.illumPct+'%',tag('live'))
+      +row('Solunar strength',(dbg.solScore!=null?dbg.solScore:'?'),tag('live'))
+      +'</div>';
+    h+='<div class="chip rounded-xl p-3 mb-2"><div class="font-semibold text-[13px] mb-1">Score I/O</div>'
+      +row('Score (output)','<b>'+d.score+'</b> '+esc(scoreWord(d.score)),'')
+      +row('Base',dbg.baseScore!=null?dbg.baseScore:50,'')
+      +row('Wind (in)',(dbg.wspd!=null?dbg.wspd+' km/h':'—'),'')
+      +row('Pressure trend',esc(dbg.pressTrend||'?'),'')
+      +row('Dawn/Dusk',dbg.isDawnDusk?'yes':'no','')
+      +row('Time bucket',esc(dbg.timeBucket||'?'),'')
+      +row('Swell (in)',(dbg.wave!=null?round(dbg.wave,1)+' m':'—'),'')
+      +row('Weather known',d.weatherKnown!==false?'yes':'NO (estimate)','')
+      +'</div>';
+    h+='<div class="chip rounded-xl p-3 mb-2"><div class="font-semibold text-[13px] mb-1">Location & cache</div>'
+      +row('Location',esc(loc?loc.name:'?'),'')
+      +row('Lat,Lon',(loc?round(loc.lat,3)+', '+round(loc.lon,3):'?'),'')
+      +row('Data age',ago(d.fetchedAt),'')
+      +row('Cache key',esc(loc?condKey(loc):'?'),'')
+      +row('Vendor pref',esc(STATE.vendor),'')
+      +'</div>';
+  }
+  h+='<div id="dbgPing" class="text-[12px] mb-3"></div><button onclick="closeSheet()" class="w-full bg-brand text-ink font-bold rounded-xl py-3">Close</button>';
+  openSheet(h);
+  const tb=$('#dbgTest');if(tb)tb.addEventListener('click',async()=>{const o=$('#dbgPing');o.innerHTML='<span class="text-muted pulse">Pinging…</span>';const r=await testSources((loc||{lat:-33.87,lon:151.21}).lat,(loc||{lat:-33.87,lon:151.21}).lon);o.innerHTML=r.map(x=>'<div class="flex justify-between py-0.5"><span class="'+(x.ok?'text-brand':'text-danger')+'">'+(x.ok?'✓':'✕')+' '+esc(x.name)+'</span><span class="text-muted">'+(x.ok?x.ms+'ms':x.code)+'</span></div>').join('');});
+}
+function bindDebug(){
+  STATE.debug=/[?&]debug=true/.test(location.search);
+  const hero=$('#heroCard');if(hero){let lp;const start=()=>{lp=setTimeout(openDebug,600);};const cancel=()=>clearTimeout(lp);
+    hero.addEventListener('touchstart',start,{passive:true});hero.addEventListener('touchend',cancel);hero.addEventListener('touchmove',cancel);
+    hero.addEventListener('mousedown',start);hero.addEventListener('mouseup',cancel);hero.addEventListener('mouseleave',cancel);}
+  if(STATE.debug)setTimeout(openDebug,1200);
+}
+
 /* ============== PWA ============== */
 let deferredPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;});
@@ -1513,7 +1577,7 @@ function getLast(){return LS.get('fishos_last',null);}
 
 /* ============== BOOT ============== */
 function boot(){
-  loadPrefs();applyTheme();bindSearch();bindUI();setupPWA();renderFav();
+  loadPrefs();applyTheme();bindSearch();bindUI();bindDebug();setupPWA();renderFav();
   try{history.replaceState({view:'dashboard',sheet:false},'');}catch(_){}
   updateBackBtn();
   if(window.matchMedia){const mq=window.matchMedia('(prefers-color-scheme: light)');const h=()=>{if(STATE.themePref==='auto')applyTheme();};mq.addEventListener?mq.addEventListener('change',h):mq.addListener&&mq.addListener(h);}
