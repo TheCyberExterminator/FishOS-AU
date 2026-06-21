@@ -1,7 +1,7 @@
 /* FishOS AU Lite — service worker (offline app shell)
    v3: HTML is network-first so deployed updates appear immediately when online,
    while still working fully offline from cache. Live API data is never cached. */
-const CACHE = 'fishos-au-lite-v3';
+const CACHE = 'fishos-au-lite-v4';
 const SHELL = [
   './',
   './index.html',

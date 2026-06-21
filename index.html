@@ -190,12 +190,22 @@
     <div id="safetyBox" class="hidden border rounded-2xl p-3.5 fade-in"></div>
 
     <div class="glass border border-line rounded-2xl p-4 fade-in">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="font-bold flex items-center gap-2"><svg class="w-4 h-4 text-brand2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/><path d="M2 17c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/></svg> Tides — Next 48 Hours</h2>
-        <span id="tide48Src" class="text-[11px] text-muted">—</span>
+      <div class="flex items-center justify-between mb-2 gap-2">
+        <h2 class="font-bold flex items-center gap-2"><svg class="w-4 h-4 text-brand2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/><path d="M2 17c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/></svg> Tides</h2>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <span id="tideSrcChip" class="chip rounded-full px-2 py-0.5 text-[10px] border border-line text-muted">—</span>
+          <span id="tideConfChip" class="chip rounded-full px-2 py-0.5 text-[10px] border border-line text-muted">—</span>
+        </div>
+      </div>
+      <div id="tideNowNext" class="grid grid-cols-2 gap-2 mb-2"></div>
+      <div class="flex items-center gap-1.5 mb-2">
+        <button id="tideView48" class="chip rounded-lg px-3 py-1 text-[12px] flex-1 text-center">48 Hours</button>
+        <button id="tideView7" class="chip rounded-lg px-3 py-1 text-[12px] flex-1 text-center">7 Days</button>
       </div>
       <canvas id="tideChart48" height="140" class="w-full"></canvas>
-      <div id="tide48List" class="mt-3"></div>
+      <div class="text-[10px] text-muted mt-0.5 mb-1">Curve shows the next 48 h</div>
+      <div id="tide48List" class="mt-1"></div>
+      <div id="tideWarn" class="hidden mt-2"></div>
     </div>
 
     <div class="glass border border-line rounded-2xl p-4 fade-in">
@@ -332,7 +342,7 @@ function toast(m,ms=2200){const t=$('#toast');t.textContent=m;t.classList.remove
 function ago(ts){const s=(Date.now()-ts)/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
 
 const STATE={loc:null,data:null,map:null,spotLayer:null,curatedLayer:null,userMarker:null,lastSpotsKey:null,
-  units:{wind:'kmh'}, region:'All', spotQuery:'', view:'dashboard', sheetOpen:false, themePref:'auto', vendor:'metno'};
+  units:{wind:'kmh'}, region:'All', spotQuery:'', view:'dashboard', sheetOpen:false, themePref:'auto', vendor:'metno', tideView:'48h'};
 
 /* ============== persistence ============== */
 const LS={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d;}catch(_){return d;}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(_){}}};
@@ -645,7 +655,8 @@ function refineExtrema(pts){
   return ev;
 }
 function engineExtrema(now,lat,lon){
-  const start=now.getTime()-13*3600000,end=now.getTime()+50*3600000,step=12*60000,pts=[];
+  // cover ~7.7 days so the offline 7-day table works; 15-min sampling is ample for 6.2h tide cycles
+  const start=now.getTime()-13*3600000,end=now.getTime()+7.7*86400000,step=15*60000,pts=[];
   for(let t=start;t<=end;t+=step)pts.push({t,h:harmonicHeight(new Date(t),lat,lon)});
   return refineExtrema(pts);
 }
@@ -672,17 +683,36 @@ function buildTide(extrema,now,real,source){
   let nearest=null,nd=Infinity;for(const e of ext){const dd=Math.abs(e.t-nowMs);if(dd<nd){nd=dd;nearest=e;}}
   let state;if(nearest&&nd<=40*60000)state=nearest.type;else state=dir==='rising'?'Run-in':(dir==='falling'?'Run-out':'Slack');
   const events48=ext.filter(e=>e.t>=nowMs-40*60000&&e.t<=nowMs+48*3600000);
-  return{real,source,state,dir,curHeight,nextHigh,nextLow,next,nextT:next?next.t:null,nextType:next?next.type:'—',events48,extrema:ext};
+  const events7d=ext.filter(e=>e.t>=nowMs-40*60000&&e.t<=nowMs+7*86400000);
+  return{real,source,state,dir,curHeight,nextHigh,nextLow,next,nextT:next?next.t:null,nextType:next?next.type:'—',events48,events7d,extrema:ext};
 }
 function tideSeries48From(ext,now){
   const out=[],start=now.getTime();for(let h=0;h<=48;h++){const t=start+h*3600000;const v=interpTide(ext,t);out.push({t,h:v?v.h:0});}return out;
+}
+/* normalise the tide source into honest user-facing labels (live / cached / modelled) */
+function tideMeta(d){
+  const t=d.tide||{},src=t.source||'';
+  if(!t.real){ // backup/offline engine — NEVER claim it is official
+    return {key:'modelled',label:'Offline backup',conf:'Low',
+      disclaimer:'Modelled tide (on-device engine) — heights & times are estimates. Check local tide charts before rock or low-tide fishing.',
+      provider:'Harmonic engine',modelled:true,failed:true};
+  }
+  const cached=/cached/i.test(src),provider=src.replace(/\s*\(cached\)/i,'');
+  let ageMin=null;try{const c=LS.get(tideCacheKey(d.lat,d.lon),null);if(c&&c.at)ageMin=Math.round((Date.now()-c.at)/60000);}catch(_){}
+  if(cached){
+    const conf=(ageMin!=null&&ageMin<1440)?'High':'Medium';
+    return {key:'cache',label:'Cached',conf,
+      disclaimer:'Cached tide data'+(ageMin!=null?(' from '+ago(Date.now()-ageMin*60000)):'')+' — '+provider+'.',
+      provider,modelled:false,failed:false};
+  }
+  return {key:'live',label:'Live',conf:'High',disclaimer:'Live tide data — '+provider+'.',provider,modelled:false,failed:false};
 }
 /* ============== WMO ============== */
 const WMO={0:['Clear sky','☀️'],1:['Mainly clear','🌤️'],2:['Partly cloudy','⛅'],3:['Overcast','☁️'],45:['Fog','🌫️'],48:['Rime fog','🌫️'],51:['Light drizzle','🌦️'],53:['Drizzle','🌦️'],55:['Heavy drizzle','🌧️'],56:['Freezing drizzle','🌧️'],57:['Freezing drizzle','🌧️'],61:['Light rain','🌦️'],63:['Rain','🌧️'],65:['Heavy rain','🌧️'],66:['Freezing rain','🌧️'],67:['Freezing rain','🌧️'],71:['Light snow','🌨️'],73:['Snow','🌨️'],75:['Heavy snow','❄️'],77:['Snow grains','🌨️'],80:['Rain showers','🌦️'],81:['Rain showers','🌧️'],82:['Violent showers','⛈️'],85:['Snow showers','🌨️'],86:['Snow showers','🌨️'],95:['Thunderstorm','⛈️'],96:['Storm + hail','⛈️'],99:['Storm + hail','⛈️']};
 const wmo=c=>WMO[c]||['—','🌥️'];
 
 /* ============== FETCH (resilient: timeout + retries + backup provider) ============== */
-async function fetchJSON(url,opts,tries=2,timeout=12000){
+async function fetchJSON(url,opts,tries=2,timeout=8000){
   for(let i=0;i<tries;i++){
     let ctrl,to;
     try{
@@ -691,10 +721,12 @@ async function fetchJSON(url,opts,tries=2,timeout=12000){
       clearTimeout(to);
       if(r.ok)return await r.json();
     }catch(_){ if(to)clearTimeout(to); }
-    if(i<tries-1)await new Promise(res=>setTimeout(res,500*(i+1))); // brief backoff
+    if(i<tries-1)await new Promise(res=>setTimeout(res,400)); // brief backoff
   }
   return null;
 }
+/* resolve to null if a promise doesn't settle within ms — keeps slow modules from blocking the score */
+function withTimeout(p,ms){return Promise.race([Promise.resolve(p).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),ms))]);}
 /* local sunrise/sunset (NOAA low-precision) — used by the backup provider */
 function sunTimes(date,lat,lon){
   const rad=Math.PI/180,deg=180/Math.PI;
@@ -821,11 +853,11 @@ function adaptWttr(j,lat,lon){
 }
 
 /* ===== MODULE 1+2: WEATHER + WIND — ordered provider chain (free, no-key) ===== */
-async function getMetNo(lat,lon){const met=await fetchJSON(metNoUrl(lat,lon),{headers:{'User-Agent':'FishOS-AU-Lite/1.0 fishing-app'}},2,12000);if(met){try{const a=adaptMetNo(met,lat,lon);if(a&&a.current)return a;}catch(_){}}return null;}
-async function getWttr(lat,lon){const j=await fetchJSON(wttrUrl(lat,lon),null,2,12000);if(j){try{const a=adaptWttr(j,lat,lon);if(a&&a.current)return a;}catch(_){}}return null;}
+async function getMetNo(lat,lon){const met=await fetchJSON(metNoUrl(lat,lon),{headers:{'User-Agent':'FishOS-AU-Lite/1.0 fishing-app'}},1,8000);if(met){try{const a=adaptMetNo(met,lat,lon);if(a&&a.current)return a;}catch(_){}}return null;}
+async function getWttr(lat,lon){const j=await fetchJSON(wttrUrl(lat,lon),null,1,8000);if(j){try{const a=adaptWttr(j,lat,lon);if(a&&a.current)return a;}catch(_){}}return null;}
 const FORECAST_PROVIDERS={
   metno:{label:'MET Norway',get:getMetNo},
-  openmeteo:{label:'Open-Meteo',get:(la,lo)=>fetchJSON(omForecastUrl(la,lo),null,2,12000).then(f=>(f&&f.current)?f:null)},
+  openmeteo:{label:'Open-Meteo',get:(la,lo)=>fetchJSON(omForecastUrl(la,lo),null,1,8000).then(f=>(f&&f.current)?f:null)},
   wttr:{label:'wttr.in',get:getWttr}
 };
 async function getForecast(lat,lon,vendor){
@@ -846,8 +878,8 @@ function tideOk(j){return !!(j&&j.hourly&&j.hourly.sea_level_height_msl&&j.hourl
 function extremaValid(ev){return Array.isArray(ev)&&ev.length>=2&&ev.every(e=>e&&(e.type==='High'||e.type==='Low')&&isFinite(e.t)&&isFinite(e.h)&&Math.abs(e.h)<15);}
 /* --- Open-Meteo Marine hourly sea-level → extrema (cell_selection=sea + ocean nudge) --- */
 async function omTideExtrema(lat,lon){
-  let j=await fetchJSON(omTideUrl(lat,lon),null,2,12000);
-  if(!tideOk(j)){for(const [dla,dlo] of [[0,0.08],[0.05,0.07],[-0.05,0.07],[0,0.15],[0.10,0.10]]){j=await fetchJSON(omTideUrl(lat+dla,lon+dlo),null,1,9000);if(tideOk(j))break;}}
+  let j=await fetchJSON(omTideUrl(lat,lon),null,1,7000);
+  if(!tideOk(j)){for(const [dla,dlo] of [[0,0.08],[0.06,0.08]]){j=await fetchJSON(omTideUrl(lat+dla,lon+dlo),null,1,6000);if(tideOk(j))break;}}
   if(!tideOk(j))return null;
   const ev=extremaFromHourly(j.hourly.time,j.hourly.sea_level_height_msl);
   return extremaValid(ev)?{extrema:ev,source:'Open-Meteo'}:null;
@@ -856,7 +888,7 @@ async function omTideExtrema(lat,lon){
 let _ausStations=null;
 async function ausStations(){
   if(_ausStations!==null)return _ausStations;
-  const j=await fetchJSON('https://austides.vercel.app/v1/stations',null,2,12000);
+  const j=await fetchJSON('https://austides.vercel.app/v1/stations',null,1,8000);
   let arr=Array.isArray(j)?j:(j&&(j.data||j.stations||j.results));
   if(!Array.isArray(arr)){_ausStations=false;return false;}
   _ausStations=arr.map(s=>({id:s.id||s.station_id||s.slug,lat:+(s.lat!=null?s.lat:s.latitude),lon:+(s.lon!=null?s.lon:(s.lng!=null?s.lng:s.longitude)),name:s.name})).filter(s=>s.id&&isFinite(s.lat)&&isFinite(s.lon));
@@ -868,7 +900,7 @@ async function ausTideExtrema(lat,lon){
   let best=null,bd=Infinity;for(const s of sts){const dd=haversine(lat,lon,s.lat,s.lon);if(dd<bd){bd=dd;best=s;}}
   if(!best||bd>180)return null;
   const ds=[0,1,2].map(o=>{const dt=new Date(Date.now()+o*86400000);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');});
-  const res=await Promise.all(ds.map(dt=>fetchJSON('https://austides.vercel.app/v1/stations/'+encodeURIComponent(best.id)+'/tides?date='+dt,null,1,10000)));
+  const res=await Promise.all(ds.map(dt=>fetchJSON('https://austides.vercel.app/v1/stations/'+encodeURIComponent(best.id)+'/tides?date='+dt,null,1,8000)));
   const ev=[],seen=new Set();
   res.forEach(j=>{const data=j&&(j.data||j.tides||j.predictions);if(Array.isArray(data))data.forEach(e=>{const t=Date.parse(e.time||e.dt||e.datetime);const h=+(e.height_m!=null?e.height_m:e.height);const ty=/h/i.test(e.type||'')?'High':(/l/i.test(e.type||'')?'Low':null);if(isFinite(t)&&isFinite(h)&&ty){const k=Math.round(t/600000);if(!seen.has(k)){seen.add(k);ev.push({type:ty,t,h});}}});});
   ev.sort((a,b)=>a.t-b.t);
@@ -876,7 +908,7 @@ async function ausTideExtrema(lat,lon){
 }
 /* --- TideTurtle (CORS-open, no key, global) — defensive parse --- */
 async function turtleTideExtrema(lat,lon){
-  const j=await fetchJSON('https://tideturtle.com/api/v1/tides?lat='+lat.toFixed(4)+'&lon='+lon.toFixed(4),null,2,12000);
+  const j=await fetchJSON('https://tideturtle.com/api/v1/tides?lat='+lat.toFixed(4)+'&lon='+lon.toFixed(4),null,1,8000);
   let cand=j&&(j.extremes||j.extrema||j.tides||(j.tide&&(j.tide.extremes||j.tide.extrema))||(j.place&&(j.place.extremes||j.place.tides))||(j.data&&(j.data.extremes||j.data.tides)));
   if(!Array.isArray(cand))return null;
   const ev=cand.map(e=>{const t=Date.parse(e.time||e.dt||e.timestamp||e.date||e.t);const h=+(e.height!=null?e.height:(e.height_m!=null?e.height_m:(e.value!=null?e.value:e.h)));const ty=/h/i.test(e.type||e.state||e.kind||'')?'High':(/l/i.test(e.type||e.state||e.kind||'')?'Low':null);return(isFinite(t)&&isFinite(h)&&ty)?{type:ty,t,h}:null;}).filter(Boolean);
@@ -890,7 +922,7 @@ async function getTides(lat,lon){
   return null;
 }
 /* ===== MODULE 4: SWELL / sea temp (optional) ===== */
-async function getSwell(lat,lon){return await fetchJSON(omSwellUrl(lat,lon),null,2,12000);}
+async function getSwell(lat,lon){return await fetchJSON(omSwellUrl(lat,lon),null,1,6000);}
 
 /* ===== ORCHESTRATOR: fetch all modules IN PARALLEL; each fails independently ===== */
 async function fetchConditions(lat,lon){
@@ -1158,23 +1190,40 @@ function drawTideChart48(d){
 }
 function renderTide48(d){
   const host=$('#tide48List');if(!host)return;
-  const real=d.tide.real,source=(d.tide.source||'').replace(' (cached)','');
-  const src=$('#tide48Src');if(src){src.textContent=real?('live · '+source):'engine';src.className='text-[11px] '+(real?'text-brand':'text-muted');}
-  const ev=(d.tide.events48||[]).slice().sort((a,b)=>a.t-b.t);
-  if(!ev.length){host.innerHTML='<div class="text-[12px] text-muted">Tide times unavailable.</div>';return;}
-  const todayKey=new Date(d.now).toDateString(),tomKey=new Date(d.now+86400000).toDateString();
-  const groups={},order=[];
-  ev.forEach(e=>{const k=new Date(e.t).toDateString();if(!groups[k]){groups[k]=[];order.push(k);}groups[k].push(e);});
-  host.innerHTML=order.map(k=>{
-    const lbl=k===todayKey?'Today':k===tomKey?'Tomorrow':new Date(k).toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
-    return '<div class="mb-2.5"><div class="text-[11px] uppercase tracking-wider text-muted mb-1">'+lbl+'</div><div class="grid grid-cols-2 gap-1.5">'+groups[k].map(e=>{
-      const up=e.type==='High',col=up?'text-brand':'text-warn';
-      const ht=' · '+(e.h>=0?'+':'')+e.h.toFixed(2)+' m';
-      return '<div class="chip rounded-lg px-2.5 py-1.5 flex items-center gap-2"><span class="'+col+' text-sm leading-none">'+(up?'▲':'▼')+'</span><div class="min-w-0"><div class="text-[13px] font-semibold leading-none">'+(up?'High':'Low')+'</div><div class="text-[11px] text-muted mt-0.5 truncate">'+fmtTime(new Date(e.t))+ht+'</div></div></div>';
-    }).join('')+'</div></div>';
-  }).join('')+(real
-    ? '<div class="text-[11px] text-muted mt-1">Source: '+esc(source)+'. Heights rel. mean sea level.</div>'
-    : '<div class="text-[11px] text-muted mt-1">Estimated by the on-device harmonic engine (no live coverage). Heights rel. mean sea level — check the Bureau of Meteorology before low-tide rock sessions.</div>');
+  const meta=tideMeta(d),t=d.tide,fh=v=>(v>=0?'+':'')+v.toFixed(1)+'m';
+  // source + confidence chips
+  const sc=$('#tideSrcChip');if(sc){sc.textContent=meta.label;sc.className='chip rounded-full px-2 py-0.5 text-[10px] border '+(meta.key==='live'?'border-brand/40 text-brand':meta.key==='cache'?'border-brand2/40 text-brand2':'border-warn/40 text-warn');}
+  const cc=$('#tideConfChip');if(cc){cc.textContent=meta.conf+' conf.';cc.className='chip rounded-full px-2 py-0.5 text-[10px] border '+(meta.conf==='High'?'border-brand/40 text-brand':meta.conf==='Medium'?'border-brand2/40 text-brand2':'border-warn/40 text-warn');}
+  // Now / Next summary
+  const nn=$('#tideNowNext');
+  if(nn){const future=[t.nextHigh,t.nextLow].filter(Boolean).sort((a,b)=>a.t-b.t);const nxt=future[0]||t.next;
+    nn.innerHTML='<div class="chip rounded-xl p-2.5"><div class="text-[10px] uppercase tracking-wider text-muted">Now</div><div class="font-bold text-[15px]">'+esc(t.state)+(t.curHeight!=null?' <span class="text-[12px] text-muted font-normal">'+fh(t.curHeight)+'</span>':'')+'</div></div>'
+      +'<div class="chip rounded-xl p-2.5"><div class="text-[10px] uppercase tracking-wider text-muted">Next</div><div class="font-bold text-[15px]">'+(nxt?(esc(nxt.type||t.nextType)+' '+fmtTime(new Date(nxt.t))+(nxt.h!=null?' <span class="text-[12px] text-muted font-normal">'+fh(nxt.h)+'</span>':'')):'—')+'</div></div>';
+  }
+  // 48h / 7-day toggle state
+  const v=STATE.tideView==='7d'?'7d':'48h',b48=$('#tideView48'),b7=$('#tideView7');
+  if(b48)b48.className='chip rounded-lg px-3 py-1 text-[12px] flex-1 text-center '+(v==='48h'?'border-brand/50 text-brand font-semibold':'text-muted');
+  if(b7)b7.className='chip rounded-lg px-3 py-1 text-[12px] flex-1 text-center '+(v==='7d'?'border-brand/50 text-brand font-semibold':'text-muted');
+  // table (grouped by date) for the chosen horizon
+  const horizon=v==='7d'?7*86400000:48*3600000;
+  const evAll=(v==='7d'?(t.events7d||t.events48):t.events48)||[];
+  const ev=evAll.filter(e=>e.t>=d.now-40*60000&&e.t<=d.now+horizon).sort((a,b)=>a.t-b.t);
+  if(!ev.length){host.innerHTML='<div class="text-[12px] text-muted">Tide times unavailable.</div>';}
+  else{
+    const todayKey=new Date(d.now).toDateString(),tomKey=new Date(d.now+86400000).toDateString(),groups={},order=[];
+    ev.forEach(e=>{const k=new Date(e.t).toDateString();if(!groups[k]){groups[k]=[];order.push(k);}groups[k].push(e);});
+    host.innerHTML=order.map(k=>{const lbl=k===todayKey?'Today':k===tomKey?'Tomorrow':new Date(k).toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
+      return '<div class="mb-2.5"><div class="text-[11px] uppercase tracking-wider text-muted mb-1">'+lbl+'</div><div class="grid grid-cols-2 gap-1.5">'+groups[k].map(e=>{const up=e.type==='High',col=up?'text-brand':'text-warn';const ht=' · '+(e.h>=0?'+':'')+e.h.toFixed(2)+' m';return '<div class="chip rounded-lg px-2.5 py-1.5 flex items-center gap-2"><span class="'+col+' text-sm leading-none">'+(up?'▲':'▼')+'</span><div class="min-w-0"><div class="text-[13px] font-semibold leading-none">'+(up?'High':'Low')+'</div><div class="text-[11px] text-muted mt-0.5 truncate">'+fmtTime(new Date(e.t))+ht+'</div></div></div>';}).join('')+'</div></div>';}).join('');
+  }
+  // coverage note when 7-day asked but live source covers fewer days
+  let cov='';
+  if(v==='7d'&&!meta.modelled){const lastT=(t.extrema||[]).reduce((mx,e)=>Math.max(mx,e.t),0),days=(lastT-d.now)/86400000;if(days<6.4)cov=' Live data covers ~'+Math.max(1,Math.round(days))+' days.';}
+  // disclosure + (when modelled) a Retry-live button
+  const warn=$('#tideWarn');
+  if(warn){warn.classList.remove('hidden');
+    if(meta.modelled){warn.innerHTML='<div class="chip border border-warn/40 text-warn rounded-xl px-3 py-2 text-[12px] flex items-center justify-between gap-2"><span>⚠️ '+esc(meta.disclaimer)+'</span><button id="tideRetry" class="text-brand2 underline shrink-0 whitespace-nowrap">Retry live</button></div>';const rb=$('#tideRetry');if(rb)rb.addEventListener('click',()=>{if(STATE.loc)loadLocation(STATE.loc);});}
+    else warn.innerHTML='<div class="text-[11px] text-muted">'+esc(meta.disclaimer)+' Heights rel. mean sea level.'+cov+'</div>';
+  }
 }
 
 /* ============== SPOTS VIEW ============== */
@@ -1297,42 +1346,50 @@ function renderFav(){
 function condKey(loc){return 'fishos_cond_'+round(loc.lat,2)+'_'+round(loc.lon,2);}
 function fetchNow(){
   if(!STATE.loc){toast('Set a location first');return;}
-  const ic=$('#fetchIcon'),ut=$('#updatedTxt');
-  if(ic){ic.style.transition='transform .8s linear';ic.style.transform='rotate(360deg)';setTimeout(()=>{ic.style.transition='';ic.style.transform='';},820);}
-  if(ut)ut.textContent='Fetching latest…';
-  // force a fresh fetch (bypass the "show cached first" so the user sees it working)
-  const loc=STATE.loc,seq=++_loadSeq;
-  fetchConditions(loc.lat,loc.lon).then(d=>{if(seq!==_loadSeq)return;render(d,false);LS.set(condKey(loc),d);if(d.src&&d.src!=='Open-Meteo')toast('Loaded · '+d.src);else toast('Updated');if(STATE.map)updateMapForLocation(loc);})
-    .catch(()=>{if(seq!==_loadSeq)return;const c=LS.get(condKey(loc),null);if(ut)ut.textContent=c?('Saved '+ago(c.fetchedAt)+' · refresh failed'):'Refresh failed';toast('Couldn’t reach any weather source — try again or switch vendor in ⚙️');});
+  const ic=$('#fetchIcon');if(ic){ic.style.transition='transform .8s linear';ic.style.transform='rotate(360deg)';setTimeout(()=>{ic.style.transition='';ic.style.transform='';},820);}
+  loadLocation(STATE.loc); // single code path — two-phase load handles render + fallback
 }
 function flagStale(msg,loc){const sb=$('#staleBar');if(!sb)return;sb.classList.remove('hidden');sb.innerHTML='<span class="w-1.5 h-1.5 rounded-full bg-warn"></span>'+msg+' <button id="retryBtn" class="text-brand2 underline ml-1">Retry</button>';const rb=$('#retryBtn');if(rb)rb.addEventListener('click',()=>loadLocation(loc));}
 function lastKnownConditions(){let best=null;try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.indexOf('fishos_cond_')===0){const v=LS.get(k,null);if(v&&v.fetchedAt&&(!best||v.fetchedAt>best.fetchedAt))best=v;}}}catch(_){}return best;}
+function tideCacheKey(lat,lon){return 'fishos_tide_'+round(lat,2)+'_'+round(lon,2);}
+function cachedTideRes(lat,lon){const c=LS.get(tideCacheKey(lat,lon),null);return (c&&c.extrema&&(Date.now()-c.at)<5*86400000)?{extrema:c.extrema,source:c.source+' (cached)'}:null;}
+function statusFor(d,swellOk){return {weather:true,wind:true,tide:d.tide.real?(d.tide.source||'live'):'engine',swell:!!swellOk};}
 let _loadSeq=0;
 async function loadLocation(loc){
-  const seq=++_loadSeq; // guard against out-of-order responses when switching spots fast
+  const seq=++_loadSeq; // guard against out-of-order responses
   STATE.loc=loc;$('#locName').textContent=loc.name;$('#speciesLoc').textContent=loc.name;renderFav();renderNearSpots();
   const cached=LS.get(condKey(loc),null);
-  // Show *something* immediately: this spot's cache, else keep the previous full render, else first-run loading.
   if(cached)render(cached,true);
   else if(STATE.data){const ut=$('#updatedTxt');if(ut)ut.textContent='Loading '+loc.name+'…';}
   else setLoadingHero();
-  try{
-    const d=await fetchConditions(loc.lat,loc.lon);
-    if(seq!==_loadSeq)return; // a newer load started — ignore this stale result
-    render(d,false);LS.set(condKey(loc),d);LS.set('fishos_lastgood',{lat:loc.lat,lon:loc.lon});saveLast(loc);
-    if(d.src&&d.src!=='Open-Meteo')$('#scoreSub').textContent+=' · via '+d.src;
-    if(STATE.map)updateMapForLocation(loc);
-  }catch(e){
-    if(seq!==_loadSeq)return;
-    // ===== SCORECARD FALLBACK CHAIN — must never bare-fail =====
-    if(cached){ render(cached,true); flagStale('Couldn’t refresh — showing saved conditions ('+ago(cached.fetchedAt)+')',loc); return; }
+
+  // ===== PHASE 1: weather/wind (required) — bounded; render the score FAST with engine/cached tide =====
+  let w=null;try{w=await withTimeout(getForecast(loc.lat,loc.lon,STATE.vendor||'auto'),11000);}catch(_){}
+  if(seq!==_loadSeq)return;
+  if(!w||!w.f){ // forecast failed → graceful fallback chain (never bare-fail)
+    if(cached){render(cached,true);flagStale('Couldn’t refresh — showing saved conditions ('+ago(cached.fetchedAt)+')',loc);return;}
     const last=lastKnownConditions();
-    if(last){ render(last,true); flagStale('No live data for '+esc(loc.name)+' — showing last-known conditions',loc); return; }
-    const est=buildEstimate(loc.lat,loc.lon); // engine-only reduced score (moon + solunar + tide)
-    if(est){ render(est,false); flagStale('No live weather reached — estimated from moon, solunar &amp; the tide engine',loc); return; }
-    // truly nothing (first run, fully offline, engine threw): honest message, not a crash
-    $('#scoreNum').textContent='–';$('#scoreLabel').textContent='No live data available';$('#scoreSub').textContent='Offline — pull to refresh when you have signal';$('#scoreFactors').innerHTML='<button id="retryBtn2" class="chip rounded-full px-3 py-1 text-[12px] text-brand2">Retry</button>';const rb=$('#retryBtn2');if(rb)rb.addEventListener('click',()=>loadLocation(loc));
+    if(last){render(last,true);flagStale('No live data for '+esc(loc.name)+' — showing last-known conditions',loc);return;}
+    const est=buildEstimate(loc.lat,loc.lon);
+    if(est){render(est,false);flagStale('No live weather reached — estimated from moon, solunar &amp; the tide engine',loc);return;}
+    $('#scoreNum').textContent='–';$('#scoreLabel').textContent='No live data available';$('#scoreSub').textContent='Offline — pull to refresh when you have signal';$('#scoreFactors').innerHTML='<button id="retryBtn2" class="chip rounded-full px-3 py-1 text-[12px] text-brand2">Retry</button>';const rb=$('#retryBtn2');if(rb)rb.addEventListener('click',()=>loadLocation(loc));return;
   }
+  let tideRes=cachedTideRes(loc.lat,loc.lon); // instant heights from cache if we have them, else engine
+  let d=process(loc.lat,loc.lon,w.f,null,tideRes);d.src=w.src;d.status=statusFor(d,false);
+  render(d,false);LS.set(condKey(loc),d);LS.set('fishos_lastgood',{lat:loc.lat,lon:loc.lon});saveLast(loc);
+  if(STATE.map)updateMapForLocation(loc);
+
+  // ===== PHASE 2: live tides + swell in the background — upgrade when (if) they arrive =====
+  Promise.allSettled([withTimeout(getTides(loc.lat,loc.lon),9000),withTimeout(getSwell(loc.lat,loc.lon),6000)]).then(([tr,sr])=>{
+    if(seq!==_loadSeq)return;
+    const liveTide=(tr.status==='fulfilled'&&tr.value&&tr.value.extrema)?tr.value:null;
+    const swell=(sr.status==='fulfilled'&&sr.value&&sr.value.current)?sr.value:null;
+    if(!liveTide&&!swell)return; // nothing better arrived — keep the fast render
+    if(liveTide){tideRes=liveTide;LS.set(tideCacheKey(loc.lat,loc.lon),{extrema:liveTide.extrema,source:liveTide.source,at:Date.now()});}
+    const m=swell?{current:swell.current}:null;
+    let d2=process(loc.lat,loc.lon,w.f,m,tideRes);d2.src=w.src;d2.status=statusFor(d2,!!swell);
+    render(d2,false);LS.set(condKey(loc),d2);
+  });
 }
 function setLoadingHero(){$('#scoreNum').textContent='–';$('#scoreLabel').textContent='Loading conditions…';$('#scoreSub').textContent='Pulling live marine data';$('#scoreFactors').innerHTML='<span class="chip rounded-full px-2 py-0.5 text-[11px] text-muted pulse">analysing…</span>';}
 
@@ -1459,10 +1516,19 @@ async function openDebug(){
   else{
     const st=d.status||{},dbg=d.dbg||{};
     const tideTag=d.tide.real?(/cached/.test(d.tide.source||'')?'cache':'live'):'engine';
+    const tm=tideMeta(d),fh=v=>(v>=0?'+':'')+v.toFixed(2)+'m';
     h+='<div class="chip rounded-xl p-3 mb-2"><div class="font-semibold text-[13px] mb-1">Data sources</div>'
       +row('Weather + Wind',esc((d.src||'?')),tag(d.weatherKnown!==false?(/cached/.test(d.src||'')?'cache':(d.estimate?'estimate':'live')):'estimate'))
       +row('Tide',esc(d.tide.source||'?'),tag(tideTag))
       +row('Swell / SST',st.swell?'ok':'none',tag(st.swell?'live':'failed'))
+      +'</div><div class="chip rounded-xl p-3 mb-2"><div class="font-semibold text-[13px] mb-1">Tide detail</div>'
+      +row('Label / confidence',esc(tm.label)+' · '+tm.conf,'')
+      +row('Provider',esc(tm.provider),'')
+      +row('Current state',esc(d.tide.state)+(d.tide.curHeight!=null?' '+fh(d.tide.curHeight):''),'')
+      +row('Next',d.tide.next?(esc(d.tide.nextType)+' '+fmtTime(new Date(d.tide.next.t))+(d.tide.next.h!=null?' '+fh(d.tide.next.h):'')):'—','')
+      +row('Events (48h / 7d)',(d.tide.events48||[]).length+' / '+(d.tide.events7d||[]).length,'')
+      +row('Extrema total',(d.tide.extrema||[]).length,'')
+      +row('Modelled?',tm.modelled?'YES (engine)':'no (real data)','')
       +row('Moon',d.moon.phase+' '+d.moon.illumPct+'%',tag('live'))
       +row('Solunar strength',(dbg.solScore!=null?dbg.solScore:'?'),tag('live'))
       +'</div>';
@@ -1551,6 +1617,9 @@ function bindUI(){
   $('#newCatch').addEventListener('click',openCatchSheet);
   $('#exportLog').addEventListener('click',exportLog);
   $('#tideInfo').addEventListener('click',openTideInfo);
+  const tv48=$('#tideView48'),tv7=$('#tideView7');
+  if(tv48)tv48.addEventListener('click',()=>{STATE.tideView='48h';if(STATE.data)renderTide48(STATE.data);});
+  if(tv7)tv7.addEventListener('click',()=>{STATE.tideView='7d';if(STATE.data)renderTide48(STATE.data);});
   $('#fetchNow').addEventListener('click',fetchNow);
   const ss=$('#spotSearch');if(ss)ss.addEventListener('input',()=>{STATE.spotQuery=ss.value;$('#spotSearchClear').classList.toggle('hidden',!ss.value);renderSpotsList();});
   const sc=$('#spotSearchClear');if(sc)sc.addEventListener('click',()=>{STATE.spotQuery='';ss.value='';sc.classList.add('hidden');renderSpotsList();ss.focus();});
@@ -1586,7 +1655,7 @@ function boot(){
   else{loadLocation({name:'Sydney, NSW',lat:-33.8688,lon:151.2093,admin:'New South Wales'});
     if(navigator.geolocation)navigator.geolocation.getCurrentPosition(pos=>{loadLocation({name:'My Location',lat:pos.coords.latitude,lon:pos.coords.longitude,admin:''});},()=>{},{timeout:6000,maximumAge:300000});}
   maybeOnboard();
-  setInterval(()=>{if(STATE.loc){const loc=STATE.loc,seq=++_loadSeq;fetchConditions(loc.lat,loc.lon).then(d=>{if(seq!==_loadSeq)return;render(d,false);LS.set(condKey(loc),d);}).catch(()=>{});}},15*60000);
+  setInterval(()=>{if(STATE.loc&&STATE.view==='dashboard')loadLocation(STATE.loc);},15*60000); // two-phase refresh
 }
 document.addEventListener('DOMContentLoaded',boot);
 </script>
