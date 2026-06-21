@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="en-AU" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0" />
+<title>FishOS AU Lite — Australian Fishing Predictor</title>
+<meta name="description" content="Free fishing prediction platform for Australian anglers. Live weather, wind, moon, solunar bite times, species predictions, curated Sydney–Newcastle spots and a catch log." />
+<meta name="theme-color" content="#0b1220" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="FishOS AU" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='42' fill='%230b1220'/%3E%3Cpath d='M40 96c26-34 86-34 112 0-26 34-86 34-112 0z' fill='none' stroke='%2334d399' stroke-width='8'/%3E%3Ccircle cx='118' cy='88' r='7' fill='%2334d399'/%3E%3Cpath d='M150 96l22-16v32z' fill='%2334d399'/%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1220'/%3E%3Cpath d='M14 32c9-12 28-12 37 0-9 12-28 12-37 0z' fill='none' stroke='%2334d399' stroke-width='3'/%3E%3Ccircle cx='40' cy='29' r='2.4' fill='%2334d399'/%3E%3Cpath d='M51 32l7-5v10z' fill='%2334d399'/%3E%3C/svg%3E" />
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode:'class', theme:{ extend:{ colors:{
+    ink:'#0b1220',panel:'var(--panel)',panel2:'var(--panel2)',line:'var(--line)',muted:'var(--muted)',
+    brand:'#34d399',brand2:'#22d3ee',warn:'#f59e0b',danger:'#ef4444',thermal:'#fb923c'
+  }, fontFamily:{ sans:['system-ui','-apple-system','Segoe UI','Roboto','Helvetica','Arial','sans-serif'] } } } }
+</script>
+<style>
+  /* ---- Theme tokens (dark default) ---- */
+  :root{
+    --bg:#070b14;--ink:#070b14;--panel:#0e1626;--panel2:#131f33;--line:#1e2c44;
+    --text:#e6edf6;--muted:#7c8aa5;--glass1:rgba(19,31,51,.85);--glass2:rgba(14,22,38,.9);
+    --chip-bg:#131f33;--chip-border:#1e2c44;--ring-track:#1e2c44;--scroll:#1e2c44;--ph:#5b6b86;
+    --pop-bg:#131f33;--pop-text:#e6edf6;--shadow:rgba(0,0,0,.5);
+  }
+  html.light{
+    --bg:#eef2f7;--ink:#ffffff;--panel:#ffffff;--panel2:#f6f9fc;--line:#dbe3ee;
+    --text:#0f1b2d;--muted:#5a6b85;--glass1:rgba(255,255,255,.9);--glass2:rgba(238,242,247,.92);
+    --chip-bg:#ffffff;--chip-border:#dce4ef;--ring-track:#e2e8f0;--scroll:#c2cedd;--ph:#94a3b8;
+    --pop-bg:#ffffff;--pop-text:#0f1b2d;--shadow:rgba(15,27,45,.16);
+  }
+  html,body{background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent;transition:background .25s ease,color .25s ease}
+  ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:8px}
+  .glass{background:linear-gradient(180deg,var(--glass1),var(--glass2));backdrop-filter:blur(10px)}
+  .ring-track{stroke:var(--ring-track)}
+  .no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+  .tabbtn.active{color:#34d399}.tabbtn.active .dot{opacity:1}
+  .fade-in{animation:fi .35s ease both}@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .leaflet-container{background:var(--panel);font-family:inherit}
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--pop-bg);color:var(--pop-text);border:1px solid var(--line)}
+  .leaflet-popup-content{margin:10px 12px;font-size:13px}
+  .pulse{animation:pl 1.4s ease-in-out infinite}@keyframes pl{0%,100%{opacity:.45}50%{opacity:1}}
+  .chip{background:var(--chip-bg);border:1px solid var(--chip-border)}
+  input::placeholder{color:var(--ph)}
+  /* primary-emphasis text follows the theme (was hard white) */
+  .text-white{color:var(--text)!important}
+  /* keep safety/bite accent text legible in light mode */
+  html.light .text-red-200{color:#b91c1c!important}
+  html.light .text-amber-100{color:#92400e!important}
+  html.light .text-amber-300{color:#b45309!important}
+  /* accessibility: visible keyboard focus */
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #34d399;outline-offset:2px;border-radius:6px}
+  @media (prefers-reduced-motion: reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+  .safe-bottom{padding-bottom:calc(env(safe-area-inset-bottom) + 84px)}
+  .safe-top{padding-top:env(safe-area-inset-top)}
+  .sheet{animation:sh .28s ease both}@keyframes sh{from{transform:translateY(100%)}to{transform:none}}
+</style>
+<script>/* set theme before paint to avoid flash */(function(){try{var p=JSON.parse(localStorage.getItem('fishos_theme'));var t=(p==='light'||p==='dark')?p:((window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');document.documentElement.classList.toggle('light',t==='light');document.documentElement.classList.toggle('dark',t!=='light');}catch(e){}})();</script>
+</head>
+<body class="font-sans antialiased min-h-screen">
+
+<!-- ===================== HEADER ===================== -->
+<header class="glass sticky top-0 z-[1200] border-b border-line safe-top">
+  <div class="max-w-2xl mx-auto px-4 pt-3 pb-3">
+    <div class="flex items-center gap-3">
+      <button id="backBtn" aria-label="Go back" class="hidden w-9 h-9 rounded-xl chip grid place-items-center active:scale-95 transition shrink-0">
+        <svg class="w-5 h-5 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div id="logoBox" class="w-9 h-9 rounded-xl bg-ink border border-line grid place-items-center shrink-0">
+        <svg viewBox="0 0 64 64" class="w-6 h-6"><path d="M14 32c9-12 28-12 37 0-9 12-28 12-37 0z" fill="none" stroke="#34d399" stroke-width="3"/><circle cx="40" cy="29" r="2.4" fill="#34d399"/><path d="M51 32l7-5v10z" fill="#34d399"/></svg>
+      </div>
+      <div class="min-w-0 flex-1">
+        <h1 class="text-[15px] font-bold tracking-tight leading-none">FishOS <span class="text-brand">AU</span> <span class="text-muted font-medium text-[11px]">Lite</span></h1>
+        <button id="locBtn" class="mt-0.5 flex items-center gap-1 text-[12px] text-muted hover:text-brand transition max-w-full">
+          <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.5-7-11a7 7 0 0114 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+          <span id="locName" class="truncate">Locating…</span>
+        </button>
+      </div>
+      <button id="themeBtn" title="Toggle dark/light" aria-label="Toggle dark or light theme" class="w-9 h-9 rounded-xl chip grid place-items-center active:scale-95 transition shrink-0"></button>
+      <button id="favBtn" title="Save this spot" aria-label="Save this spot" class="w-9 h-9 rounded-xl chip grid place-items-center active:scale-95 transition shrink-0">
+        <svg id="favIcon" class="w-4.5 h-4.5 text-muted" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17.3l-6.2 3.7 1.6-7L2 9.2l7.1-.6L12 2l2.9 6.6 7.1.6-5.4 4.8 1.6 7z"/></svg>
+      </button>
+      <button id="gpsBtn" title="Use my location" aria-label="Use my location" class="w-9 h-9 rounded-xl chip grid place-items-center active:scale-95 transition shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-brand2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+      </button>
+      <button id="setBtn" title="Settings" class="w-9 h-9 rounded-xl chip grid place-items-center active:scale-95 transition shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-muted"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1V21a2 2 0 11-4 0v-.1A1.6 1.6 0 005 19.4l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.6 1.6 0 003 14H3a2 2 0 110-4h.1A1.6 1.6 0 004.6 5l-.1-.1A2 2 0 117.3 2.1L7.4 2.2A1.6 1.6 0 0010 2.5V3a2 2 0 114 0v.1a1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8z"/></svg>
+      </button>
+    </div>
+
+    <div class="mt-3 relative">
+      <div class="flex items-center gap-2 chip rounded-xl px-3 h-10">
+        <svg class="w-4 h-4 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input id="search" type="text" inputmode="search" autocomplete="off" placeholder="Search town, beach or postcode…" class="bg-transparent outline-none text-sm w-full text-white" />
+        <button id="searchClear" class="hidden text-muted text-lg leading-none px-1">&times;</button>
+      </div>
+      <div id="suggest" class="hidden absolute left-0 right-0 mt-1 glass border border-line rounded-xl overflow-hidden z-[1300] shadow-2xl"></div>
+    </div>
+    <div id="favChips" class="mt-2 flex gap-1.5 overflow-x-auto no-scrollbar"></div>
+  </div>
+</header>
+
+<main id="app" class="max-w-2xl mx-auto px-4 pt-4 safe-bottom">
+
+  <!-- ====== DASHBOARD ====== -->
+  <section id="view-dashboard" class="space-y-4">
+    <div class="flex items-center justify-between chip rounded-xl px-3 py-2 text-[12px]">
+      <span id="updatedTxt" class="text-muted truncate">Loading…</span>
+      <button id="fetchNow" aria-label="Fetch latest conditions now" class="text-brand2 font-medium flex items-center gap-1 shrink-0 active:scale-95 transition">
+        <svg id="fetchIcon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 019-9 9 9 0 016.7 3M21 12a9 9 0 01-9 9 9 9 0 01-6.7-3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg>
+        Fetch now
+      </button>
+    </div>
+    <div id="staleBar" class="hidden chip rounded-xl px-3 py-2 text-[12px] text-muted flex items-center gap-2"></div>
+
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <div class="flex items-center gap-4">
+        <div class="relative w-[112px] h-[112px] shrink-0">
+          <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+            <circle cx="60" cy="60" r="52" fill="none" class="ring-track" stroke-width="12"/>
+            <circle id="scoreRing" cx="60" cy="60" r="52" fill="none" stroke="#34d399" stroke-width="12" stroke-linecap="round" stroke-dasharray="327" stroke-dashoffset="327"/>
+          </svg>
+          <div class="absolute inset-0 grid place-items-center"><div class="text-center">
+            <div id="scoreNum" class="text-3xl font-extrabold leading-none">–</div>
+            <div class="text-[10px] uppercase tracking-widest text-muted mt-0.5">Score</div>
+          </div></div>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div id="scoreLabel" class="text-lg font-bold">Loading conditions…</div>
+          <div id="scoreSub" class="text-[13px] text-muted mt-0.5">Pulling live marine data</div>
+          <div id="scoreFactors" class="mt-2 flex flex-wrap gap-1.5"></div>
+        </div>
+      </div>
+      <div class="mt-3 grid grid-cols-2 gap-2">
+        <button id="shareBtn" class="chip rounded-xl py-2 text-[13px] font-medium flex items-center justify-center gap-2 active:scale-95 transition">
+          <svg class="w-4 h-4 text-brand2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>Share
+        </button>
+        <button id="logHereBtn" class="chip rounded-xl py-2 text-[13px] font-medium flex items-center justify-center gap-2 active:scale-95 transition">
+          <svg class="w-4 h-4 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Log a catch
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div class="glass border border-line rounded-2xl p-3.5 fade-in">
+        <div class="flex items-center justify-between"><span class="text-[11px] uppercase tracking-wider text-muted">Wind</span>
+          <svg class="w-4 h-4 text-brand2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h11a3 3 0 100-6"/><path d="M3 12h16a3 3 0 110 6"/><path d="M3 16h7a2.5 2.5 0 110 5"/></svg></div>
+        <div class="mt-1 flex items-end gap-1.5"><span id="windVal" class="text-2xl font-bold">–</span><span id="windUnit" class="text-xs text-muted mb-1">km/h</span></div>
+        <div class="mt-1 flex items-center gap-1.5 text-[12px] text-muted">
+          <svg id="windArrow" class="w-3.5 h-3.5 text-brand" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 9h-3v11h-2V11H8z"/></svg>
+          <span id="windDir">–</span><span id="windGust" class="ml-auto chip rounded px-1.5 py-0.5 text-[10px]">gust –</span>
+        </div>
+      </div>
+      <div class="glass border border-line rounded-2xl p-3.5 fade-in">
+        <div class="flex items-center justify-between"><span class="text-[11px] uppercase tracking-wider text-muted">Weather</span><span id="wxEmoji" class="text-base">⛅</span></div>
+        <div class="mt-1 flex items-end gap-1.5"><span id="temp" class="text-2xl font-bold">–</span><span class="text-xs text-muted mb-1">°C</span></div>
+        <div id="wxDesc" class="mt-1 text-[12px] text-muted truncate">–</div>
+      </div>
+      <div class="glass border border-line rounded-2xl p-3.5 fade-in">
+        <div class="flex items-center justify-between"><span class="text-[11px] uppercase tracking-wider text-muted">Swell</span>
+          <svg class="w-4 h-4 text-brand2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/><path d="M2 17c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/></svg></div>
+        <div class="mt-1 flex items-end gap-1.5"><span id="wave" class="text-2xl font-bold">–</span><span class="text-xs text-muted mb-1">m</span></div>
+        <div id="wavePeriod" class="mt-1 text-[12px] text-muted truncate">period –</div>
+      </div>
+      <div class="glass border border-line rounded-2xl p-3.5 fade-in">
+        <div class="flex items-center justify-between"><span class="text-[11px] uppercase tracking-wider text-muted">Moon</span><span id="moonEmoji" class="text-base">🌙</span></div>
+        <div class="mt-1 flex items-end gap-1.5"><span id="moonIllum" class="text-2xl font-bold">–</span><span class="text-xs text-muted mb-1">%</span></div>
+        <div id="moonPhase" class="mt-1 text-[12px] text-muted truncate">–</div>
+      </div>
+    </div>
+
+    <div class="glass border border-line rounded-2xl p-3.5 fade-in grid grid-cols-3 gap-2 text-center">
+      <div><div class="text-[11px] uppercase tracking-wider text-muted">Pressure</div>
+        <div class="mt-0.5 font-bold"><span id="pressure">–</span><span class="text-xs text-muted font-normal"> hPa</span></div><div id="pressTrend" class="text-[11px] text-muted">–</div></div>
+      <div class="border-x border-line"><button id="tideInfo" class="text-[11px] uppercase tracking-wider text-muted inline-flex items-center gap-1">Tide <span id="tideLive" class="hidden w-1.5 h-1.5 rounded-full bg-brand" title="Live tide data"></span><span class="w-3.5 h-3.5 rounded-full border border-muted text-[9px] grid place-items-center">i</span></button>
+        <div class="mt-0.5 font-bold" id="tideState">–</div><div id="tideNext" class="text-[11px] text-muted">–</div></div>
+      <div><div class="text-[11px] uppercase tracking-wider text-muted">Water</div>
+        <div class="mt-0.5 font-bold"><span id="waterTemp">–</span><span class="text-xs text-muted font-normal"> °C</span></div><div id="uvIndex" class="text-[11px] text-muted">UV –</div></div>
+    </div>
+
+    <div id="safetyBox" class="hidden border rounded-2xl p-3.5 fade-in"></div>
+
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-bold flex items-center gap-2"><svg class="w-4 h-4 text-brand2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/><path d="M2 17c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/></svg> Tides — Next 48 Hours</h2>
+        <span id="tide48Src" class="text-[11px] text-muted">—</span>
+      </div>
+      <canvas id="tideChart48" height="140" class="w-full"></canvas>
+      <div id="tide48List" class="mt-3"></div>
+    </div>
+
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-bold flex items-center gap-2"><svg class="w-4 h-4 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Best Times to Fish</h2>
+        <span class="text-[11px] text-muted">Solunar · today</span>
+      </div>
+      <div id="biteTimes" class="grid grid-cols-2 gap-2"></div>
+    </div>
+
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-bold flex items-center gap-2"><svg class="w-4 h-4 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12c4-6 12-6 16 0-4 6-12 6-16 0z"/><circle cx="15" cy="11" r="1" fill="currentColor"/></svg> Top Species Today</h2>
+        <button data-goto="species" class="text-[12px] text-brand2">All →</button>
+      </div>
+      <div id="topSpecies" class="space-y-2"></div>
+    </div>
+
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <h2 class="font-bold flex items-center gap-2 mb-3"><svg class="w-4 h-4 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l7 7M10 10l11 11M14 7l3-3M7 14l-3 3"/></svg> Bait &amp; Rig Plan</h2>
+      <div id="baitPlan" class="space-y-2 text-sm"></div>
+    </div>
+
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <div class="flex items-center justify-between mb-3"><h2 class="font-bold flex items-center gap-2"><svg class="w-4 h-4 text-brand2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15a4 4 0 014-4 5 5 0 019.6-1.5A3.5 3.5 0 1118 17H7a4 4 0 01-4-2z"/></svg> Weather Forecast</h2><button data-goto="forecast" class="text-[12px] text-brand2">7-day →</button></div>
+      <div id="miniForecast" class="space-y-1.5"></div>
+    </div>
+
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <div class="flex items-center justify-between mb-3"><h2 class="font-bold flex items-center gap-2"><svg class="w-4 h-4 text-thermal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2s5 5 5 10a5 5 0 11-10 0c0-5 5-10 5-10z"/></svg> Spots near you</h2><button data-goto="spots" class="text-[12px] text-brand2">All spots →</button></div>
+      <div id="nearSpots" class="space-y-2"></div>
+    </div>
+  </section>
+
+  <!-- ====== SPOTS ====== -->
+  <section id="view-spots" class="hidden space-y-3">
+    <div class="glass border border-line rounded-2xl p-3.5 fade-in">
+      <h2 class="font-bold text-sm flex items-center gap-2 mb-1">NSW Spot Guide</h2>
+      <p class="text-[12px] text-muted"><span id="spotCountTxt">113</span> hand-researched spots, Illawarra → Newcastle. <span class="text-thermal font-medium">🔥 = warm-water (thermal)</span> · <span class="text-brand2 font-medium">🌊 = current (pressure water)</span>. Each spot lists its <span class="text-white">top NSW baits</span>. Tap a spot to load its live conditions.</p>
+    </div>
+    <div class="flex items-center gap-2 chip rounded-xl px-3 h-10">
+      <svg class="w-4 h-4 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      <input id="spotSearch" type="text" inputmode="search" autocomplete="off" aria-label="Search spots by name or species" placeholder="Search spot or species — e.g. Bundeena, kingfish" class="bg-transparent outline-none text-sm w-full text-white" />
+      <button id="spotSearchClear" aria-label="Clear search" class="hidden text-muted text-lg leading-none px-1">&times;</button>
+    </div>
+    <div id="regionFilter" class="flex gap-1.5 overflow-x-auto no-scrollbar pb-1"></div>
+    <div id="spotResultCount" class="text-[11px] text-muted px-1"></div>
+    <div id="spotsList" class="space-y-2.5"></div>
+  </section>
+
+  <!-- ====== MAP ====== -->
+  <section id="view-map" class="hidden space-y-3">
+    <div class="glass border border-line rounded-2xl overflow-hidden fade-in"><div id="map" class="w-full" style="height:60vh"></div></div>
+    <div class="glass border border-line rounded-2xl p-3 fade-in">
+      <div class="flex items-center justify-between mb-2"><h2 class="font-bold text-sm">Nearby (live OSM + curated)</h2><span id="spotCount" class="text-[11px] text-muted">scanning…</span></div>
+      <div id="mapLegend" class="flex flex-wrap gap-2 mb-2 text-[11px]"></div>
+      <div id="spotListMap" class="space-y-1.5 max-h-56 overflow-auto no-scrollbar"></div>
+    </div>
+  </section>
+
+  <!-- ====== SPECIES ====== -->
+  <section id="view-species" class="hidden space-y-3">
+    <div class="glass border border-line rounded-2xl p-3 fade-in">
+      <p class="text-[12px] text-muted">Probability is calculated live from season, wind, time, moon &amp; habitat for <span id="speciesLoc" class="text-white">your spot</span>. Each card carries a rig — full guide in <span class="text-brand2">RIG-GUIDE.md</span>.</p>
+    </div>
+    <div id="speciesList" class="space-y-2.5"></div>
+  </section>
+
+  <!-- ====== FORECAST ====== -->
+  <section id="view-forecast" class="hidden space-y-3">
+    <div id="bestDayBanner" class="hidden rounded-2xl p-4 fade-in border border-brand/40 bg-brand/10"></div>
+    <div class="glass border border-line rounded-2xl p-4 fade-in"><h2 class="font-bold mb-1">Tomorrow</h2><div id="tomorrowBox" class="text-sm text-muted">–</div></div>
+    <div class="glass border border-line rounded-2xl p-4 fade-in"><h2 class="font-bold mb-1">This Weekend</h2><div id="weekendBox" class="grid grid-cols-2 gap-3 mt-1"></div></div>
+    <div class="glass border border-line rounded-2xl p-4 fade-in"><h2 class="font-bold mb-3">24h Wind &amp; Tide</h2><canvas id="hourChart" height="150" class="w-full"></canvas></div>
+  </section>
+
+  <!-- ====== LOG ====== -->
+  <section id="view-log" class="hidden space-y-3">
+    <div id="logStats" class="grid grid-cols-3 gap-2"></div>
+    <div class="glass border border-line rounded-2xl p-4 fade-in">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-bold">Catch Log</h2>
+        <div class="flex gap-2">
+          <button id="exportLog" class="text-[12px] text-brand2">Export</button>
+          <button id="newCatch" class="text-[12px] chip rounded-lg px-2.5 py-1 font-medium">+ Add</button>
+        </div>
+      </div>
+      <div id="logList" class="space-y-2"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ===================== BOTTOM NAV ===================== -->
+<nav class="fixed bottom-0 inset-x-0 z-[1200] glass border-t border-line" style="padding-bottom:env(safe-area-inset-bottom)">
+  <div class="max-w-2xl mx-auto grid grid-cols-5">
+    <button data-tab="dashboard" class="tabbtn active flex flex-col items-center gap-1 py-2.5 text-muted transition">
+      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      <span class="text-[10px] font-medium">Today</span><span class="dot w-1 h-1 rounded-full bg-brand opacity-0"></span></button>
+    <button data-tab="spots" class="tabbtn flex flex-col items-center gap-1 py-2.5 text-muted transition">
+      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.5-7-11a7 7 0 0114 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      <span class="text-[10px] font-medium">Spots</span><span class="dot w-1 h-1 rounded-full bg-brand opacity-0"></span></button>
+    <button data-tab="map" class="tabbtn flex flex-col items-center gap-1 py-2.5 text-muted transition">
+      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg>
+      <span class="text-[10px] font-medium">Map</span><span class="dot w-1 h-1 rounded-full bg-brand opacity-0"></span></button>
+    <button data-tab="species" class="tabbtn flex flex-col items-center gap-1 py-2.5 text-muted transition">
+      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12c4-6 12-6 16 0-4 6-12 6-16 0z"/><circle cx="15" cy="11" r="1" fill="currentColor"/></svg>
+      <span class="text-[10px] font-medium">Species</span><span class="dot w-1 h-1 rounded-full bg-brand opacity-0"></span></button>
+    <button data-tab="log" class="tabbtn flex flex-col items-center gap-1 py-2.5 text-muted transition">
+      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/></svg>
+      <span class="text-[10px] font-medium">Log</span><span class="dot w-1 h-1 rounded-full bg-brand opacity-0"></span></button>
+  </div>
+</nav>
+
+<!-- Sheets / modals -->
+<div id="sheetWrap" class="hidden fixed inset-0 z-[1500]">
+  <div id="sheetBg" class="absolute inset-0 bg-black/60"></div>
+  <div id="sheet" class="sheet absolute bottom-0 inset-x-0 max-w-2xl mx-auto glass border-t border-line rounded-t-2xl p-4 max-h-[88vh] overflow-auto" style="padding-bottom:calc(env(safe-area-inset-bottom) + 16px)"></div>
+</div>
+
+<div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-24 z-[1600] hidden glass border border-line rounded-xl px-4 py-2.5 text-sm shadow-2xl"></div>
+
+<script>
+'use strict';
+/* ============== helpers ============== */
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const round=(v,d=0)=>{const p=10**d;return Math.round(v*p)/p;};
+const fmtTime=d=>d.toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'});
+const compass=deg=>['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(((deg%360)/22.5))%16];
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(m,ms=2200){const t=$('#toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.add('hidden'),ms);}
+function ago(ts){const s=(Date.now()-ts)/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+
+const STATE={loc:null,data:null,map:null,spotLayer:null,curatedLayer:null,userMarker:null,lastSpotsKey:null,
+  units:{wind:'kmh'}, region:'All', spotQuery:'', view:'dashboard', sheetOpen:false, themePref:'auto', vendor:'auto'};
+
+/* ============== persistence ============== */
+const LS={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d;}catch(_){return d;}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(_){}}};
+function loadPrefs(){const u=LS.get('fishos_units',null); if(u)STATE.units=u; const t=LS.get('fishos_theme',null); STATE.themePref=(t==='light'||t==='dark'||t==='auto')?t:'auto'; const v=LS.get('fishos_vendor',null); STATE.vendor=(v==='openmeteo'||v==='metno'||v==='auto')?v:'auto';}
+function savePrefs(){LS.set('fishos_units',STATE.units);LS.set('fishos_vendor',STATE.vendor);}
+
+/* ============== THEME (dark / light / auto) ============== */
+function systemLight(){return !!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches);}
+function resolveTheme(p){return p==='auto'?(systemLight()?'light':'dark'):p;}
+function applyTheme(){
+  const t=resolveTheme(STATE.themePref),light=t==='light';
+  document.documentElement.classList.toggle('light',light);
+  document.documentElement.classList.toggle('dark',!light);
+  const mc=document.querySelector('meta[name="theme-color"]');if(mc)mc.setAttribute('content',light?'#eef2f7':'#0b1220');
+  updateThemeIcon(t);
+  if(STATE.data){drawHourChart(STATE.data);drawTideChart48(STATE.data);} // chart axis colours follow theme
+}
+function setTheme(p){STATE.themePref=p;LS.set('fishos_theme',p);applyTheme();}
+function toggleTheme(){setTheme(resolveTheme(STATE.themePref)==='light'?'dark':'light');}
+function updateThemeIcon(t){
+  const b=$('#themeBtn');if(!b)return;
+  // show a sun in dark mode (tap to brighten), a moon in light mode
+  b.innerHTML=t==='light'
+    ? '<svg class="w-4.5 h-4.5 text-muted" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"/></svg>'
+    : '<svg class="w-4.5 h-4.5 text-warn" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>';
+  b.title=t==='light'?'Switch to dark':'Switch to light';
+}
+
+/* ============== units ============== */
+function windDisp(kmh){ return STATE.units.wind==='kn'? round(kmh/1.852) : round(kmh); }
+function windUnitLabel(){ return STATE.units.wind==='kn'?'kn':'km/h'; }
+
+/* ============== SPECIES DB ============== */
+const SPECIES=[
+  {key:'bream',name:'Bream',sci:'Acanthopagrus australis',emoji:'🐟',habitat:['estuary','rocks','jetty'],tide:'run-out',wind:25,baits:['Live prawn','Yabbies (nippers)','Peeled prawn','Bread','Hardbody lure'],rig:'Light running sinker, 6lb fluoro, 1/0 suicide hook',season:[3,4,5,6,7,8],time:['dawn','dusk','night'],tip:'Berley with bread or pellets at the top of the run-out. Fish structure — bridge pylons, oyster racks, snags.'},
+  {key:'flathead',name:'Flathead',sci:'Platycephalus fuscus',emoji:'🐠',habitat:['estuary','beach','sand'],tide:'run-out',wind:30,baits:['Soft plastic (jerk shad)','Pilchard','Whitebait','Live poddy mullet'],rig:'1/4–3/8oz jighead on 4" plastic, or paternoster with strip bait',season:[9,10,11,12,1,2,3],time:['day','dawn','dusk'],tip:'Drift sand flats and drop-offs on the run-out. Slow-hop plastics along the bottom — flatties ambush.'},
+  {key:'whiting',name:'Sand Whiting',sci:'Sillago ciliata',emoji:'🐟',habitat:['beach','estuary','sand'],tide:'run-in',wind:22,baits:['Live beach worm','Blood worm','Pipi','Squirt worm','Surface popper'],rig:'Long-shank #4, light running ball sinker, 4–6lb leader',season:[10,11,12,1,2,3],time:['day','dawn'],tip:'Run-in tide over clean sand. Keep moving — whiting feed in patches. Poppers shine on warm mornings.'},
+  {key:'jewfish',name:'Jewfish (Soapie)',sci:'Argyrosomus japonicus',emoji:'🐡',habitat:['estuary','rocks','deep'],tide:'tide-change',wind:25,baits:['Live mullet','Live yakka','Squid','Fresh fish fillet','Soft vibe'],rig:'Running sinker to swivel, 40lb leader, 6/0 octopus or live-bait hook',season:[3,4,5,6,7,8],time:['night','dusk'],tip:'School jew. Deep holes & bridge lights on the tide change after dark. Big baits, big patience.'},
+  {key:'mulloway',name:'Mulloway',sci:'Argyrosomus japonicus',emoji:'🐋',habitat:['beach','rocks','deep','estuary'],tide:'tide-change',wind:28,baits:['Live tailor','Live mullet','Squid head','Whole fresh squid','Large soft plastic'],rig:'Running sinker, 50–60lb leader, 8/0 circle (snell two hooks for live bait)',season:[3,4,5,6,7,8],time:['night','dusk','dawn'],tip:'Trophy class. Beach gutters & rock ledges on the bottom of the tide, around new/full moon at night.'},
+  {key:'tailor',name:'Tailor',sci:'Pomatomus saltatrix',emoji:'🐟',habitat:['beach','rocks'],tide:'run-in',wind:30,baits:['Pilchard on ganged hooks','Garfish','Metal slug','White popper'],rig:'Gang of 3–4 × 4/0 hooks, wire or heavy mono trace (toothy)',season:[5,6,7,8,9,10],time:['dawn','dusk'],tip:'Chopper schools smash baitfish at first & last light. Cast metals into the wash, retrieve fast.'},
+  {key:'salmon',name:'Australian Salmon',sci:'Arripis trutta',emoji:'🐟',habitat:['beach','rocks'],tide:'run-in',wind:35,baits:['Metal slug','Pilchard','Surface popper','Soft plastic'],rig:'40g metal slug straight through, or ganged pilchard under a float',season:[4,5,6,7,8,9],time:['dawn','dusk','day'],tip:'Hard-fighting winter schools in surf gutters & off the rocks. Look for birds working bait — cast metals.'},
+  {key:'snapper',name:'Snapper',sci:'Chrysophrys auratus',emoji:'🐠',habitat:['reef','deep','rocks'],tide:'run-in',wind:25,baits:['Whole squid','Pilchard','Soft plastic (5–7")','Fresh slimy mackerel','Octopus'],rig:'Paternoster or running sinker, 30–40lb leader, 5/0–7/0 octopus',season:[7,8,9,10,11],time:['dawn','dusk','night'],tip:'Reds love a low-light bite over reef & gravel. Berley a trail; float baits back unweighted in current.'},
+  {key:'trevally',name:'Silver Trevally',sci:'Pseudocaranx georgianus',emoji:'🐟',habitat:['estuary','rocks','reef','jetty'],tide:'run-in',wind:28,baits:['Peeled prawn','Soft plastic','Small metal','Cut pilchard','Bread'],rig:'Light running sinker or unweighted, 8–12lb leader, #1–1/0 hook',season:[12,1,2,3,4,5],time:['dawn','dusk','day'],tip:'Hard pullers for their size. Berley deep estuary holes & jetty pylons on a building tide.'},
+  {key:'kingfish',name:'Yellowtail Kingfish',sci:'Seriola lalandi',emoji:'🐋',habitat:['reef','rocks','deep'],tide:'run-in',wind:25,baits:['Live squid','Live yakka/slimy','Knife jig','Stickbait','Whole squid'],rig:'Heavy live-bait rig 60–80lb leader 7/0–9/0, or jig assist hooks',season:[12,1,2,3,4,5],time:['day','dawn'],tip:'Hoodlums hold on reefs, headlands & channels in strong current. Live bait under a balloon or speed-jig.'}
+];
+function seasonName(m){if([12,1,2].includes(m))return'Summer';if([3,4,5].includes(m))return'Autumn';if([6,7,8].includes(m))return'Winter';return'Spring';}
+
+/* ============== CURATED SPOTS Sydney→Newcastle ============== */
+/* feature: 'thermal' = warm water, 'current' = pressure water */
+const SPOTS=[
+  /* ===== ILLAWARRA & SOUTH COAST ===== */
+  {n:'Lake Illawarra (Warilla)',r:'Illawarra & South Coast',lat:-34.5226,lon:150.8406,t:'estuary',sp:['Bream','Whiting','Flathead','Luderick'],why:'Big shallow lake (33km²) — whiting & bream in summer, luderick in winter. Fish the snags.',feat:null},
+  {n:'Windang Bridge & Channel',r:'Illawarra & South Coast',lat:-34.5340,lon:150.8660,t:'deep',sp:['Bream','Whiting','Luderick','Flathead'],why:'The lake entrance — quick tides funnel fish; best 30 min either side of the change.',feat:'current'},
+  {n:'Windang Beach',r:'Illawarra & South Coast',lat:-34.5345,lon:150.8720,t:'beach',sp:['Tailor','Salmon','Jewfish','Whiting'],why:'Surf beach at the lake mouth — sand, surf & salmon; good jew at night on pilchard.',feat:null},
+  {n:'Bellambi Point',r:'Illawarra & South Coast',lat:-34.3670,lon:150.9230,t:'rock',sp:['Bream','Tailor','Trevally','Salmon','Drummer','Kingfish'],why:'Rocks on the south end for bream/tailor/trevally; salmon, drummer & kings off the point.',feat:'current'},
+  {n:'Towradgi Beach',r:'Illawarra & South Coast',lat:-34.3980,lon:150.9110,t:'beach',sp:['Bream','Whiting','Tailor'],why:'Locals’ favourite surf beach — bream, whiting & tailor; quieter at dawn.',feat:null},
+  {n:'Perkins Beach (Towradgi)',r:'Illawarra & South Coast',lat:-34.4080,lon:150.9050,t:'beach',sp:['Bream','Salmon','Flathead','Tailor','Jewfish'],why:'Artificial reef (2019) makes it an abundant hotspot — bream, salmon, flathead, jew.',feat:null},
+  {n:'Wollongong Harbour (Belmore Basin)',r:'Illawarra & South Coast',lat:-34.4210,lon:150.9030,t:'jetty',sp:['Bream','Trevally','Squid','Salmon'],why:'Sheltered harbour & breakwall — bream, trevally and squid around the basin.',feat:null},
+  {n:'Hill 60 / Port Kembla',r:'Illawarra & South Coast',lat:-34.4760,lon:150.9100,t:'rock',sp:['Salmon','Bonito','Drummer','Kingfish'],why:'Headland with deep water access — salmon, bonito & the odd king. Mind the swell.',feat:'current'},
+  {n:'Austinmer Beach',r:'Illawarra & South Coast',lat:-34.3050,lon:150.9280,t:'beach',sp:['Bream','Trevally','Luderick','Drummer','Salmon'],why:'Often overlooked — fish dawn/dusk for bream, trevally, drummer and salmon.',feat:null},
+  {n:'Bass Point (Shellharbour)',r:'Illawarra & South Coast',lat:-34.5910,lon:150.9010,t:'reef',sp:['Snapper','Kingfish','Salmon','Drummer'],why:'Renowned reef/headland — excellent snapper, kings & pelagics. Experienced rock anglers only.',feat:'current'},
+  {n:'Shellharbour',r:'Illawarra & South Coast',lat:-34.5810,lon:150.8710,t:'rock',sp:['Snapper','Drummer','Bream','Salmon'],why:'Rocky foreshore & reef — snapper and drummer off the ledges, bream in the bay.',feat:null},
+  {n:'Minnamurra River',r:'Illawarra & South Coast',lat:-34.6300,lon:150.8550,t:'estuary',sp:['Flathead','Trevally','Bream','Luderick'],why:'Pretty estuary — top species are dusky flathead, white trevally & bream.',feat:null},
+  {n:'Kiama Harbour / Blowhole Pt',r:'Illawarra & South Coast',lat:-34.6710,lon:150.8600,t:'rock',sp:['Salmon','Bonito','Kingfish','Snapper'],why:'Harbour & headland — salmon and bonito off the rocks, kings when bait is about.',feat:'current'},
+  {n:'Werri Beach (Gerringong)',r:'Illawarra & South Coast',lat:-34.7450,lon:150.8350,t:'beach',sp:['Salmon','Tailor','Whiting','Bream'],why:'Long clean surf beach — salmon and tailor in the gutters, whiting on the sand.',feat:null},
+  {n:'Seven Mile Beach (Gerroa)',r:'Illawarra & South Coast',lat:-34.7780,lon:150.7950,t:'beach',sp:['Salmon','Tailor','Jewfish','Whiting'],why:'Wild surf beach — salmon, tailor and big jew in the deeper gutters at night.',feat:null},
+
+  /* ===== ROYAL NP & PORT HACKING ===== */
+  {n:'Bundeena Bay',r:'Royal NP & Port Hacking',lat:-34.0820,lon:151.1510,t:'estuary',sp:['Flathead','Bream','Salmon','Whiting','Squid'],why:'Royal NP gateway — top species dusky flathead, bream & salmon; surf-cast off the bay.',feat:null},
+  {n:'Maianbar',r:'Royal NP & Port Hacking',lat:-34.0850,lon:151.1310,t:'sand',sp:['Flathead','Whiting','Bream'],why:'Quiet sand flats on Port Hacking — wade for flathead and whiting on the run-in.',feat:null},
+  {n:'Jibbon Beach',r:'Royal NP & Port Hacking',lat:-34.0800,lon:151.1630,t:'beach',sp:['Salmon','Whiting','Bream'],why:'Sheltered Royal NP beach — salmon in the wash, whiting and bream on the sand.',feat:null},
+  {n:'Wattamolla',r:'Royal NP & Port Hacking',lat:-34.1370,lon:151.1170,t:'rock',sp:['Salmon','Bream','Drummer'],why:'Scenic lagoon & rock platforms in the Royal NP — salmon, bream and drummer.',feat:null},
+  {n:'Garie Beach',r:'Royal NP & Port Hacking',lat:-34.1720,lon:151.0800,t:'beach',sp:['Salmon','Tailor','Whiting'],why:'Remote Royal NP surf beach — salmon and tailor in the gutters. Check swell/access.',feat:null},
+  {n:'Hacking River (Audley)',r:'Royal NP & Port Hacking',lat:-34.0730,lon:151.0580,t:'estuary',sp:['Bass','Bream','Flathead'],why:'Upper Hacking — Australian bass in the fresh, bream & flathead lower down. Soft plastics.',feat:null},
+  {n:'Swallow Rock Reserve (Grays Pt)',r:'Royal NP & Port Hacking',lat:-34.0580,lon:151.0730,t:'deep',sp:['Bream','Flathead'],why:'Hacking River edge — safe family fishing, plus a deep channel by the ramp for bream/flatty.',feat:'current'},
+  {n:'Gunnamatta Bay (Cronulla)',r:'Royal NP & Port Hacking',lat:-34.0580,lon:151.1500,t:'jetty',sp:['Tailor','Whiting','Flathead','Bream'],why:'Fish around the baths — moored boats & nets concentrate bait. Loads of tailor & whiting.',feat:null},
+  {n:'Darook Park (Cronulla)',r:'Royal NP & Port Hacking',lat:-34.0640,lon:151.1480,t:'sand',sp:['Whiting','Flathead','Bream'],why:'Calm Port Hacking foreshore — whiting, flathead & bream at most tides.',feat:null},
+  {n:'Cronulla Beach (Bate Bay)',r:'Royal NP & Port Hacking',lat:-34.0520,lon:151.1550,t:'beach',sp:['Salmon','Mulloway','Bream','Whiting'],why:'Long patrolled surf beach — salmon, mulloway & bream; fish the changing tide.',feat:null},
+  {n:'Port Hacking entrance (rocks)',r:'Royal NP & Port Hacking',lat:-34.0780,lon:151.1630,t:'rock',sp:['Kingfish','Salmon','Mulloway','Drummer'],why:'Deep water rock ledges — kings, salmon and mulloway in the wash zones. Experienced only.',feat:'current'},
+  {n:'Silver Beach (Kurnell)',r:'Botany Bay & Georges R',lat:-34.0120,lon:151.2140,t:'sand',sp:['Whiting','Flathead','Bream'],why:'Sheltered Botany Bay beach — whiting, flathead & bream on the flats.',feat:null},
+
+  /* ===== BOTANY BAY & GEORGES RIVER ===== */
+  {n:'La Perouse',r:'Botany Bay & Georges R',lat:-33.9850,lon:151.2330,t:'rock',sp:['Kingfish','Salmon','Bream','Drummer','Squid'],why:'Botany Bay north head — kings & salmon off the rocks, bream and squid in the bay.',feat:'current'},
+  {n:'Dolls Point / Lady Robinsons',r:'Botany Bay & Georges R',lat:-33.9910,lon:151.1510,t:'sand',sp:['Whiting','Flathead','Bream'],why:'Long Botany Bay sand beach — whiting & flathead on the flats, bream around structure.',feat:null},
+  {n:'Captain Cook Bridge',r:'Botany Bay & Georges R',lat:-33.9970,lon:151.1280,t:'deep',sp:['Bream','Flathead','Whiting','Luderick','Jewfish'],why:'Georges River mouth bridge — pylons & current hold bream, flathead, luderick and jew.',feat:'current'},
+  {n:'Tom Uglys Bridge',r:'Botany Bay & Georges R',lat:-33.9780,lon:151.1030,t:'deep',sp:['Bream','Flathead','Jewfish'],why:'Classic Georges River bridge — fish the pylons and shadow line on the tide for jew & bream.',feat:'current'},
+  {n:'Como Bridge & Pleasure Grds',r:'Botany Bay & Georges R',lat:-34.0000,lon:151.0630,t:'estuary',sp:['Bream','Flathead','Whiting','Luderick'],why:'Family-friendly Georges River reach — whiting, flathead & bream; luderick off the bridge.',feat:'current'},
+  {n:'Kogarah Bay',r:'Botany Bay & Georges R',lat:-33.9920,lon:151.1170,t:'estuary',sp:['Bream','Flathead','Luderick'],why:'Sheltered Georges River bay — consistent bream & flathead around the moorings.',feat:null},
+  {n:'Woronora River',r:'Botany Bay & Georges R',lat:-34.0220,lon:151.0480,t:'estuary',sp:['Bass','Bream','Flathead'],why:'Quiet Georges tributary — bass up top, bream & flathead in the lower reaches.',feat:null},
+  {n:'Sans Souci (Georges R)',r:'Botany Bay & Georges R',lat:-33.9950,lon:151.1330,t:'estuary',sp:['Bream','Flathead','Jewfish'],why:'Deep Georges River channel & rock walls — bream, flathead and school jew.',feat:'current'},
+
+  /* ===== PARRAMATTA RIVER (release only — dioxin advisory west of the Harbour Bridge) ===== */
+  {n:'Meadowbank / Kissing Point Wharf',r:'Parramatta River',lat:-33.8167,lon:151.0886,t:'jetty',sp:['Bream','Flathead','Whiting'],why:'Big bream, flathead & whiting off the wharf — best after dark. Closed to fishing 5–10am. Release only (dioxin advisory).',feat:null},
+  {n:'Huntleys Point Wharf (Gladesville)',r:'Parramatta River',lat:-33.8340,lon:151.1430,t:'jetty',sp:['Jewfish','Kingfish','Bream'],why:'Deep wharf — big jew, kingfish & bream after 8pm when ferries ease. Release only (dioxin advisory).',feat:'current'},
+  {n:'Iron Cove Bridge',r:'Parramatta River',lat:-33.8630,lon:151.1500,t:'deep',sp:['Bream','Whiting','Flathead'],why:'Family-friendly bridge with parking & toilets — bream, whiting & flathead on the pylons. Release only.',feat:'current'},
+  {n:'Clarkes Point Reserve (Woolwich)',r:'Parramatta River',lat:-33.8400,lon:151.1710,t:'deep',sp:['Luderick','Bream','Whiting','Mulloway','Kingfish','Snapper'],why:'Breakwall into deep water — luderick, bream, mulloway, even live-bait kings & snapper. East side run-out, south side run-in.',feat:'current'},
+  {n:'Rodd Point',r:'Parramatta River',lat:-33.8620,lon:151.1430,t:'estuary',sp:['Bream','Flathead'],why:'Easy land-based bay — bream & flathead on soft plastics close in. Release only (dioxin advisory).',feat:null},
+  {n:'Cabarita Park',r:'Parramatta River',lat:-33.8460,lon:151.1140,t:'estuary',sp:['Bream','Flathead','Whiting'],why:'Parkland foreshore & wharf — bream, flathead & whiting; popular for prawning. Release only.',feat:null},
+  {n:'Lane Cove River (Fig Tree)',r:'Sydney Harbour',lat:-33.8320,lon:151.1600,t:'estuary',sp:['Bream','Flathead','Luderick'],why:'Mangrove-lined tributary — snaggy bream & flathead, winter luderick. Light gear, high tide.',feat:null},
+
+  /* ===== EASTERN BEACHES ===== */
+  {n:'Bondi Beach',r:'Eastern Beaches',lat:-33.8910,lon:151.2770,t:'beach',sp:['Salmon','Whiting','Bream','Tailor'],why:'Iconic surf beach — salmon & tailor in the gutters, whiting on the sand at the south end.',feat:null},
+  {n:'Coogee / Wedding Cake Is',r:'Eastern Beaches',lat:-33.9210,lon:151.2580,t:'rock',sp:['Bream','Drummer','Salmon','Kingfish'],why:'Rock ledges around the bay — bream, drummer & salmon; kings off the deeper rocks.',feat:'current'},
+  {n:'Clovelly',r:'Eastern Beaches',lat:-33.9140,lon:151.2670,t:'rock',sp:['Luderick','Drummer','Bream'],why:'Sheltered rock channel — luderick on weed, drummer and bream off the ledges.',feat:null},
+  {n:'Maroubra Beach',r:'Eastern Beaches',lat:-33.9500,lon:151.2570,t:'beach',sp:['Salmon','Mulloway','Bream','Whiting'],why:'Powerful surf beach — salmon, big jew at night and whiting/bream in the gutters.',feat:null},
+  {n:'Maroubra (Magic Point)',r:'Eastern Beaches',lat:-33.9570,lon:151.2600,t:'rock',sp:['Kingfish','Salmon','Drummer','Bonito'],why:'Deep-water rock platform — kings, salmon & bonito. Dangerous in swell — gear up, go with a mate.',feat:'current'},
+  {n:'Malabar / Long Bay',r:'Eastern Beaches',lat:-33.9620,lon:151.2520,t:'estuary',sp:['Bream','Salmon','Whiting'],why:'Sheltered bay — bream & whiting in the calm, salmon when they push in.',feat:null},
+
+  /* ===== SYDNEY HARBOUR ===== */
+  {n:'Camp Cove (Watsons Bay)',r:'Sydney Harbour',lat:-33.8385,lon:151.2810,t:'rock',sp:['Kingfish','Squid','Bream'],why:"Sydney Harbour's best shore access to quality kingfish; squid at your feet for bait.",feat:null},
+  {n:'Middle Head',r:'Sydney Harbour',lat:-33.8243,lon:151.2560,t:'rock',sp:['Kingfish','Tailor','Drummer'],why:'Reef meets sand — kings, tailor & drummer. Exposed to swell, take care.',feat:'current'},
+  {n:'Clifton Gardens (Chowder Bay)',r:'Sydney Harbour',lat:-33.8412,lon:151.2526,t:'jetty',sp:['Kingfish','Jewfish','Bream'],why:'Jetty drops into deep water; renowned night jew spot on the drop-off.',feat:null},
+  {n:'Rose Bay — the Blue Hole',r:'Sydney Harbour',lat:-33.8686,lon:151.2670,t:'sand',sp:['Flathead','Whiting','Bream'],why:'Sand flat & deep hole — wade the flats at low tide for flathead & whiting.',feat:null},
+  {n:'Bradleys Head',r:'Sydney Harbour',lat:-33.8516,lon:151.2412,t:'rock',sp:['Bream','Salmon','Tailor','Flathead'],why:'Bream, luderick, flatties, salmon & tailor. Busy boat traffic — care.',feat:'current'},
+  {n:'Nielsen Park (Vaucluse)',r:'Sydney Harbour',lat:-33.8520,lon:151.2720,t:'sand',sp:['Bream','Flathead','Whiting'],why:'Netted swimming bay with sand & reef edges — bream, flathead & whiting close in.',feat:null},
+  {n:'Balmoral Beach',r:'Sydney Harbour',lat:-33.8270,lon:151.2520,t:'beach',sp:['Bream','Whiting','Squid','Kingfish'],why:'Calm Middle Harbour beach — whiting & bream, squid off the rocks, kings on the bait runs.',feat:null},
+  {n:'Parsley Bay (Vaucluse)',r:'Sydney Harbour',lat:-33.8470,lon:151.2700,t:'jetty',sp:['Bream','Flathead','Trevally'],why:'Sheltered netted bay & footbridge — bream & flathead in summer, trevally & john dory in winter.',feat:null},
+  {n:'Manly Cove / West Esplanade',r:'Sydney Harbour',lat:-33.8000,lon:151.2840,t:'jetty',sp:['Bream','Whiting','Squid','Flathead'],why:'Easy netted harbour beach & wharf — whiting, bream, flathead and good squid.',feat:null},
+  {n:'Dobroyd Head',r:'Sydney Harbour',lat:-33.8080,lon:151.2620,t:'rock',sp:['Tailor','Salmon','Kingfish','Drummer'],why:'North Harbour rock ledges with deep water — tailor, salmon, kings & drummer.',feat:'current'},
+
+  /* ===== NORTHERN BEACHES ===== */
+  {n:'Manly Beach',r:'Northern Beaches',lat:-33.7970,lon:151.2880,t:'beach',sp:['Whiting','Tailor','Bream','Salmon'],why:'Long ocean beach — whiting & bream on the sand, tailor & salmon in the gutters at first light.',feat:null},
+  {n:'Curl Curl',r:'Northern Beaches',lat:-33.7680,lon:151.3000,t:'beach',sp:['Whiting','Bream','Tailor','Jewfish'],why:'Excellent gutters — whiting, bream & tailor; jew at night. Popular rock-spin start under 1.2m swell.',feat:null},
+  {n:'Long Reef / Dee Why',r:'Northern Beaches',lat:-33.7440,lon:151.3110,t:'beach',sp:['Whiting','Salmon','Tailor'],why:'Great gutters; reports of big whiting on live worms at first light. Reef platform nearby.',feat:null},
+  {n:'Narrabeen Lagoon entrance',r:'Northern Beaches',lat:-33.7130,lon:151.3040,t:'estuary',sp:['Flathead','Bream','Whiting'],why:'Lagoon mouth — flathead, bream & whiting on the run-out; surf gutters either side.',feat:'current'},
+  {n:'Mona Vale',r:'Northern Beaches',lat:-33.6770,lon:151.3100,t:'rock',sp:['Salmon','Tailor','Drummer','Bream'],why:'Beach plus rock headland — salmon & tailor off the sand, drummer & bream off the rocks.',feat:null},
+  {n:'Avalon Beach',r:'Northern Beaches',lat:-33.6350,lon:151.3300,t:'beach',sp:['Whiting','Salmon','Tailor'],why:'Clean surf beach — whiting on the sand, salmon & tailor in the gutters.',feat:null},
+  {n:'Whale Beach',r:'Northern Beaches',lat:-33.6130,lon:151.3330,t:'rock',sp:['Kingfish','Salmon','Tailor','Drummer'],why:'Fish the northern corner — safe, accessible rock spinning for kings, salmon & tailor.',feat:'current'},
+  {n:'Palm Beach',r:'Northern Beaches',lat:-33.5990,lon:151.3230,t:'beach',sp:['Whiting','Salmon','Jewfish'],why:'Long surf gutters; whiting & salmon by day, jew in the dark on the gutters.',feat:null},
+
+  /* ===== PITTWATER & HAWKESBURY ===== */
+  {n:'Pittwater (Palm Beach wharf)',r:'Pittwater & Hawkesbury',lat:-33.5870,lon:151.3240,t:'estuary',sp:['Kingfish','Squid','Salmon'],why:'Adjoins the Hawkesbury mouth — schools of kingfish and big squid.',feat:null},
+  {n:'Hawkesbury River (Brooklyn)',r:'Pittwater & Hawkesbury',lat:-33.5500,lon:151.2230,t:'deep',sp:['Mulloway','Jewfish','Kingfish','Flathead'],why:'The famous mulloway river — plus winter hairtail in the deep holes.',feat:'current'},
+  {n:'Patonga',r:'Pittwater & Hawkesbury',lat:-33.5510,lon:151.2710,t:'beach',sp:['Flathead','Whiting','Bream'],why:'Calm beach/estuary at the Hawkesbury mouth — easy, family-friendly.',feat:null},
+  {n:'Bobbin Head (Cowan Creek)',r:'Pittwater & Hawkesbury',lat:-33.6450,lon:151.1570,t:'estuary',sp:['Bream','Flathead','Mulloway'],why:'Deep sheltered creek in Ku-ring-gai NP — bream & flathead, mulloway in the holes. Fishes in any wind.',feat:null},
+  {n:'Apple Tree Bay',r:'Pittwater & Hawkesbury',lat:-33.6540,lon:151.1600,t:'estuary',sp:['Flathead','Bream','Trevally'],why:'Cowan Creek bay with ramp — flathead on the flats, bream & trevally around structure.',feat:null},
+  {n:'Akuna Bay',r:'Pittwater & Hawkesbury',lat:-33.6400,lon:151.2320,t:'estuary',sp:['Kingfish','Bream','Flathead','Squid'],why:'Deep marina bay — kings & squid on the moorings, bream & flathead in close.',feat:null},
+  {n:'Church Point (Pittwater)',r:'Pittwater & Hawkesbury',lat:-33.6430,lon:151.2830,t:'jetty',sp:['Bream','Whiting','Squid','Kingfish'],why:'Wharf & foreshore on western Pittwater — bream, whiting, squid and the odd king.',feat:null},
+  {n:'Dangar Island (Hawkesbury)',r:'Pittwater & Hawkesbury',lat:-33.5430,lon:151.2430,t:'deep',sp:['Mulloway','Bream','Flathead','Kingfish'],why:'Deep Hawkesbury channel around the island — mulloway, kings & bream on the tide.',feat:'current'},
+  {n:'Berowra Waters',r:'Pittwater & Hawkesbury',lat:-33.6100,lon:151.1350,t:'estuary',sp:['Bream','Flathead','Bass'],why:'Steep-sided Hawkesbury arm — bream & flathead, bass in the upper creeks. Sheltered.',feat:null},
+
+  /* ===== CENTRAL COAST ===== */
+  {n:'Brisbane Water (Woy Woy)',r:'Central Coast',lat:-33.4850,lon:151.3250,t:'estuary',sp:['Bream','Whiting','Flathead','Luderick'],why:'Oyster leases & sand banks — big bream/whiting; winter luderick plentiful.',feat:null},
+  {n:'Ettalong sand flats',r:'Central Coast',lat:-33.5130,lon:151.3360,t:'sand',sp:['Whiting','Bream','Flathead'],why:'Shallow, calm flats — tides bring fish close. Top family spot.',feat:null},
+  {n:'The Rip Bridge (Blackwall)',r:'Central Coast',lat:-33.5050,lon:151.3230,t:'deep',sp:['Mulloway','Tailor','Kingfish','Snapper','Bream'],why:'Strong-tide deep water funnels big fish. Fish the tide changes.',feat:'current'},
+  {n:'Terrigal — The Skillion',r:'Central Coast',lat:-33.4470,lon:151.4470,t:'rock',sp:['Kingfish','Salmon','Tailor'],why:'Headland with deep access — kings, salmon, tailor & pelagic surprises.',feat:'current'},
+  {n:'Terrigal Haven',r:'Central Coast',lat:-33.4420,lon:151.4490,t:'jetty',sp:['Trevally','Squid','Kingfish','Salmon'],why:'Sheltered haven & breakwall — trevally, squid and live-bait kings off the wall.',feat:null},
+  {n:'Avoca Lake',r:'Central Coast',lat:-33.4670,lon:151.4350,t:'estuary',sp:['Bream','Flathead','Whiting'],why:'Small ICOLL lagoon — bream, flathead & whiting; fires when the entrance is open.',feat:null},
+  {n:'Avoca Beach',r:'Central Coast',lat:-33.4630,lon:151.4340,t:'beach',sp:['Whiting','Salmon','Tailor','Jewfish'],why:'Surf gutters — whiting & salmon by day, tailor & jew at first/last light.',feat:null},
+  {n:'Wamberal Beach',r:'Central Coast',lat:-33.4280,lon:151.4520,t:'beach',sp:['Whiting','Salmon','Tailor'],why:'Long open beach — whiting on the sand, salmon & tailor in the gutters.',feat:null},
+  {n:'The Entrance Channel',r:'Central Coast',lat:-33.3490,lon:151.5030,t:'estuary',sp:['Bream','Flathead','Whiting','Tailor'],why:'Rapid channel linking lake to ocean — a thoroughfare for all species.',feat:'current'},
+  {n:'Tuggerah Lake (Long Jetty)',r:'Central Coast',lat:-33.3580,lon:151.4810,t:'jetty',sp:['Flathead','Bream','Tailor'],why:'Huge shallow lake; #1 logged species are dusky flathead & yellowfin bream.',feat:null},
+  {n:'Norah Head',r:'Central Coast',lat:-33.2820,lon:151.5780,t:'rock',sp:['Tailor','Salmon','Drummer','Kingfish','Snapper'],why:'Lighthouse headland with deep water — tailor, salmon, drummer, kings & snapper.',feat:'current'},
+  {n:'Toukley Bridge',r:'Central Coast',lat:-33.2700,lon:151.5400,t:'deep',sp:['Bream','Flathead','Whiting','Luderick'],why:'Bridge between Tuggerah & Budgewoi lakes — current holds bream, flathead & luderick.',feat:'current'},
+  {n:'Budgewoi Lake',r:'Central Coast',lat:-33.2330,lon:151.5560,t:'estuary',sp:['Bream','Flathead'],why:'Quiet, productive lake for bream & flathead — space for everyone.',feat:null},
+  {n:'Lake Munmorah',r:'Central Coast',lat:-33.2010,lon:151.5840,t:'estuary',sp:['Flathead','Bream','Trevally','Tailor','Salmon'],why:'Scenic bush-meets-water lake; flathead, bream, trevally, tailor & salmon.',feat:null},
+  {n:'Killcare / Putty Beach',r:'Central Coast',lat:-33.5220,lon:151.3750,t:'beach',sp:['Salmon','Tailor','Whiting','Drummer'],why:'Beach plus Bouddi NP headlands — salmon & tailor in the surf, drummer off the rocks.',feat:null},
+
+  /* ===== WARM-WATER BELT ===== */
+  {n:'Mannering Park (Wyee Bay)',r:'Warm-water belt',lat:-33.1700,lon:151.5350,t:'thermal',sp:['Bream','Flathead','Tarwhine'],why:'Warm-water belt near Vales Point outlet — winter fish magnet. Obey canal closures!',feat:'thermal'},
+  {n:'Myuna Bay (Eraring)',r:'Warm-water belt',lat:-33.0680,lon:151.5180,t:'thermal',sp:['Bream','Flathead'],why:'Thermal influence keeps fish active in winter. Canals closed 1 May–31 Aug, 6pm–6am.',feat:'thermal'},
+
+  /* ===== LAKE MACQUARIE ===== */
+  {n:'Swansea Channel',r:'Lake Macquarie',lat:-33.0870,lon:151.6480,t:'deep',sp:['Kingfish','Mulloway','Salmon','Trevally','Luderick'],why:'One of the best on the NSW coast — kings ambush in the current, jew hold the holes.',feat:'current'},
+  {n:'Marks Point flats',r:'Lake Macquarie',lat:-33.0560,lon:151.6240,t:'sand',sp:['Flathead','Whiting'],why:'Prime wade-able flathead & whiting flats in summer.',feat:null},
+  {n:'Pulbah Island',r:'Lake Macquarie',lat:-33.0840,lon:151.5870,t:'reef',sp:['Snapper','Trevally'],why:'Reef edges around the reserve — snapper & trevally feed at first light.',feat:null},
+  {n:'Croudace Bay / Wangi',r:'Lake Macquarie',lat:-33.0470,lon:151.6010,t:'estuary',sp:['Bream','Flathead'],why:'Sheltered bays — reliable bream & flathead protected from almost any wind.',feat:null},
+  {n:'Belmont (Lake Mac)',r:'Lake Macquarie',lat:-33.0300,lon:151.6650,t:'estuary',sp:['Bream','Flathead','Whiting','Luderick'],why:'Eastern shore bays & jetties — bream, flathead, whiting; winter luderick on the weed.',feat:null},
+  {n:'Warners Bay',r:'Lake Macquarie',lat:-32.9720,lon:151.6520,t:'estuary',sp:['Bream','Flathead'],why:'Western shore with foreshore walk & jetties — easy bream & flathead.',feat:null},
+  {n:'Toronto',r:'Lake Macquarie',lat:-33.0100,lon:151.5950,t:'estuary',sp:['Bream','Flathead','Luderick'],why:'Deep western bays — bream & flathead around moorings, luderick off the wharves.',feat:null},
+  {n:'Murrays Beach',r:'Lake Macquarie',lat:-33.1100,lon:151.6300,t:'sand',sp:['Flathead','Whiting','Bream'],why:'Sheltered southern-lake flats — wade for flathead and whiting; protected from wind.',feat:null},
+  {n:'Catherine Hill Bay',r:'Lake Macquarie',lat:-33.1600,lon:151.6250,t:'rock',sp:['Salmon','Tailor','Drummer','Bream'],why:'Historic jetty & rock platforms — salmon, tailor & drummer off the ledges.',feat:null},
+  {n:'Caves Beach',r:'Lake Macquarie',lat:-33.1800,lon:151.6380,t:'rock',sp:['Salmon','Tailor','Bream','Drummer'],why:'Beach plus sea caves & rock ledges — salmon, tailor and drummer; explore at low tide.',feat:null},
+  {n:'Blacksmiths Beach',r:'Lake Macquarie',lat:-33.0750,lon:151.6650,t:'beach',sp:['Whiting','Tailor','Salmon','Jewfish'],why:'Beach beside Swansea channel mouth — whiting & tailor, big jew in the gutters at night.',feat:null},
+
+  /* ===== NEWCASTLE ===== */
+  {n:'Swansea Breakwall',r:'Newcastle',lat:-33.0890,lon:151.6650,t:'rock',sp:['Tailor','Salmon','Bream','Mulloway'],why:'Channel-mouth current & structure where ocean meets the lake.',feat:'current'},
+  {n:'Redhead Beach',r:'Newcastle',lat:-33.0000,lon:151.7150,t:'beach',sp:['Whiting','Tailor','Salmon','Jewfish'],why:'Long surf beach under the bluff — whiting & tailor, jew in the deeper gutters.',feat:null},
+  {n:'Merewether / Bar Beach',r:'Newcastle',lat:-32.9430,lon:151.7660,t:'beach',sp:['Salmon','Tailor'],why:'Reliable salmon when gutters form on a moderate swell.',feat:null},
+  {n:'Newcastle Baths / Cowrie Hole',r:'Newcastle',lat:-32.9290,lon:151.7900,t:'rock',sp:['Bream','Drummer','Trevally','Salmon'],why:'Rock platforms by the baths — bream, drummer & trevally; salmon in the wash.',feat:null},
+  {n:'Nobbys Breakwall',r:'Newcastle',lat:-32.9180,lon:151.8010,t:'rock',sp:['Kingfish','Bonito','Tailor','Salmon'],why:'Harbour-mouth big-fish lane — kings & pelagics, best when water >20°C.',feat:'current'},
+  {n:'Queens Wharf / Honeysuckle',r:'Newcastle',lat:-32.9270,lon:151.7870,t:'jetty',sp:['Mulloway','Bream'],why:'Deep Hunter River channel — mulloway under the berths, bream on the wharves.',feat:'current'},
+  {n:'Horseshoe Beach',r:'Newcastle',lat:-32.9220,lon:151.7880,t:'estuary',sp:['Bream','Flathead','Whiting'],why:'Sheltered harbour beach (dog-friendly) — easy bream, flathead & whiting.',feat:null},
+  {n:'Stockton Breakwall',r:'Newcastle',lat:-32.9180,lon:151.7920,t:'rock',sp:['Mulloway','Tailor','Bream','Salmon'],why:'North side of the harbour mouth — mulloway, tailor & bream in the channel current.',feat:'current'},
+  {n:'Stockton Beach',r:'Newcastle',lat:-32.8950,lon:151.7980,t:'beach',sp:['Whiting','Tailor'],why:'30km of gutters & wash — prime whiting & tailor country.',feat:null},
+  {n:'Hexham (Hunter River)',r:'Newcastle',lat:-32.8320,lon:151.6900,t:'estuary',sp:['Bream','Flathead','Mulloway'],why:'Upper Hunter estuary & flats — bream, flathead and mulloway around the bridge & snags.',feat:null}
+];
+const REGIONS=['All','Illawarra & South Coast','Royal NP & Port Hacking','Botany Bay & Georges R','Parramatta River','Sydney Harbour','Eastern Beaches','Northern Beaches','Pittwater & Hawkesbury','Central Coast','Warm-water belt','Lake Macquarie','Newcastle'];
+
+/* ============== MOON ============== */
+function moonInfo(date){
+  const synodic=29.530588853, knownNew=Date.UTC(2000,0,6,18,14,0)/86400000, now=date.getTime()/86400000;
+  let age=((now-knownNew)%synodic+synodic)%synodic;
+  const illum=(1-Math.cos(2*Math.PI*age/synodic))/2;
+  let phase,emoji; const f=age/synodic;
+  if(age<1.0||age>=synodic-1.0){phase='New Moon';emoji='🌑';}
+  else if(f<0.22){phase='Waxing Crescent';emoji='🌒';}
+  else if(f<0.28){phase='First Quarter';emoji='🌓';}
+  else if(f<0.47){phase='Waxing Gibbous';emoji='🌔';}
+  else if(f<0.53){phase='Full Moon';emoji='🌕';}
+  else if(f<0.72){phase='Waning Gibbous';emoji='🌖';}
+  else if(f<0.78){phase='Last Quarter';emoji='🌗';}
+  else{phase='Waning Crescent';emoji='🌘';}
+  return{age,illum,phase,emoji,illumPct:Math.round(illum*100)};
+}
+/* ============== SOLUNAR ============== */
+function dayNumber(date){
+  const Y=date.getUTCFullYear(),M=date.getUTCMonth()+1,D=date.getUTCDate();
+  const UT=date.getUTCHours()+date.getUTCMinutes()/60+date.getUTCSeconds()/3600;
+  const d=367*Y-Math.floor(7*(Y+Math.floor((M+9)/12))/4)+Math.floor(275*M/9)+D-730530;
+  return d+UT/24;
+}
+function moonAltitude(date,lat,lon){
+  const rad=Math.PI/180,deg=180/Math.PI,d=dayNumber(date);
+  const N=(125.1228-0.0529538083*d)*rad,i=5.1454*rad,w=(318.0634+0.1643573223*d)*rad,a=60.2666,e=0.0549;
+  let M=(115.3654+13.0649929509*d)*rad;M%=2*Math.PI;if(M<0)M+=2*Math.PI;
+  let E=M+e*Math.sin(M)*(1+e*Math.cos(M));for(let k=0;k<6;k++){E=E-(E-e*Math.sin(E)-M)/(1-e*Math.cos(E));}
+  const xv=a*(Math.cos(E)-e),yv=a*(Math.sqrt(1-e*e)*Math.sin(E)),v=Math.atan2(yv,xv),r=Math.sqrt(xv*xv+yv*yv);
+  const xh=r*(Math.cos(N)*Math.cos(v+w)-Math.sin(N)*Math.sin(v+w)*Math.cos(i));
+  const yh=r*(Math.sin(N)*Math.cos(v+w)+Math.cos(N)*Math.sin(v+w)*Math.cos(i));
+  const zh=r*(Math.sin(v+w)*Math.sin(i));
+  const lonE=Math.atan2(yh,xh),latE=Math.atan2(zh,Math.sqrt(xh*xh+yh*yh)),ecl=(23.4393-3.563e-7*d)*rad;
+  const xe=Math.cos(lonE)*Math.cos(latE);
+  const ye=Math.sin(lonE)*Math.cos(latE)*Math.cos(ecl)-Math.sin(latE)*Math.sin(ecl);
+  const ze=Math.sin(lonE)*Math.cos(latE)*Math.sin(ecl)+Math.sin(latE)*Math.cos(ecl);
+  const RA=Math.atan2(ye,xe),Dec=Math.atan2(ze,Math.sqrt(xe*xe+ye*ye));
+  const ws=282.9404+4.70935e-5*d,Ms=356.0470+0.9856002585*d,Ls=ws+Ms;
+  const UT=date.getUTCHours()+date.getUTCMinutes()/60+date.getUTCSeconds()/3600;
+  let GMST0=((Ls+180)%360+360)%360;
+  let LST=((GMST0+UT*15.04107+lon)%360+360)%360;
+  let HA=((LST-RA*deg)%360+360)%360;if(HA>180)HA-=360;HA*=rad;
+  const latR=lat*rad;
+  return Math.asin(Math.sin(latR)*Math.sin(Dec)+Math.cos(latR)*Math.cos(Dec)*Math.cos(HA))*deg;
+}
+function solunarPeriods(baseDate,lat,lon){
+  const start=new Date(baseDate);start.setHours(0,0,0,0);
+  const step=10*60000,n=24*6;let prev=null,prevAlt=null;const rises=[],sets=[],samples=[];
+  for(let k=0;k<=n;k++){const t=new Date(start.getTime()+k*step);const alt=moonAltitude(t,lat,lon);samples.push({t,alt});
+    if(prevAlt!==null){if(prevAlt<0&&alt>=0)rises.push(new Date((prev.getTime()+t.getTime())/2));if(prevAlt>=0&&alt<0)sets.push(new Date((prev.getTime()+t.getTime())/2));}
+    prev=t;prevAlt=alt;}
+  let maxS=samples[0],minS=samples[0];for(const s of samples){if(s.alt>maxS.alt)maxS=s;if(s.alt<minS.alt)minS=s;}
+  const majors=[{label:'Major',t:maxS.t,len:120},{label:'Major',t:minS.t,len:120}];
+  const minors=[];rises.forEach(t=>minors.push({label:'Minor',t,len:60}));sets.forEach(t=>minors.push({label:'Minor',t,len:60}));
+  return{majors,minors};
+}
+function tideModel(now,lat,lon){
+  const sol=solunarPeriods(now,lat,lon);const transit=sol.majors[0].t.getTime();const period=12.42*3600000;
+  let phase=((now.getTime()-transit)%period+period)%period;const frac=phase/period;const height=Math.cos(frac*2*Math.PI);
+  let state,dir;if(frac<0.5)dir='falling';else dir='rising';
+  if(frac<0.08||frac>0.92)state='High';else if(frac>0.42&&frac<0.58)state='Low';else state=dir==='rising'?'Run-in':'Run-out';
+  let nextFrac=frac<0.5?0.5:1.0;const nextT=new Date(now.getTime()+(nextFrac-frac)*period);const nextType=nextFrac===0.5?'Low':'High';
+  return{state,dir,height,frac,nextT:nextT.getTime(),nextType,real:false};
+}
+/* Real tide from Open-Meteo Marine sea_level_height_msl (FES2014 model, free).
+   Falls back to the lunar model (offline / inland / no coverage). */
+function tidesFromSeaLevel(m,now){
+  if(!m||!m.hourly||!m.hourly.sea_level_height_msl||!m.hourly.time)return null;
+  const times=m.hourly.time.map(t=>new Date(t).getTime());
+  const hs=m.hourly.sea_level_height_msl;
+  if(hs.filter(v=>v!=null).length<6)return null; // no real coverage here
+  const nowMs=now.getTime();
+  // extrema (high/low turning points)
+  const events=[];
+  for(let i=1;i<hs.length-1;i++){
+    if(hs[i]==null||hs[i-1]==null||hs[i+1]==null)continue;
+    if(hs[i]>=hs[i-1]&&hs[i]>=hs[i+1]&&(hs[i]>hs[i-1]||hs[i]>hs[i+1]))events.push({type:'High',t:times[i],h:hs[i]});
+    else if(hs[i]<=hs[i-1]&&hs[i]<=hs[i+1]&&(hs[i]<hs[i-1]||hs[i]<hs[i+1]))events.push({type:'Low',t:times[i],h:hs[i]});
+  }
+  // current height + direction (interpolate between bracketing hours)
+  let curHeight=null,dir='steady';
+  let idx=times.findIndex(t=>t>=nowMs);if(idx<=0)idx=1;if(idx>=times.length)idx=times.length-1;
+  const t0=times[idx-1],t1=times[idx],h0=hs[idx-1],h1=hs[idx];
+  if(h0!=null&&h1!=null&&t1>t0){const f=(nowMs-t0)/(t1-t0);curHeight=h0+(h1-h0)*f;dir=h1>h0?'rising':(h1<h0?'falling':'steady');}
+  const future=events.filter(e=>e.t>nowMs).sort((a,b)=>a.t-b.t);
+  const nextHigh=future.find(e=>e.type==='High')||null;
+  const nextLow=future.find(e=>e.type==='Low')||null;
+  const next=future[0]||null;
+  // nearest extremum decides High/Low vs Run-in/Run-out
+  let nearest=null,nd=Infinity;for(const e of events){const dd=Math.abs(e.t-nowMs);if(dd<nd){nd=dd;nearest=e;}}
+  let state;
+  if(nearest&&nd<=40*60000)state=nearest.type;
+  else state=dir==='rising'?'Run-in':(dir==='falling'?'Run-out':'Slack');
+  return{real:true,state,dir,curHeight,nextHigh,nextLow,next,nextT:next?next.t:null,nextType:next?next.type:'—',
+    height:curHeight!=null?0:0,frac:0};
+}
+/* ============== WMO ============== */
+const WMO={0:['Clear sky','☀️'],1:['Mainly clear','🌤️'],2:['Partly cloudy','⛅'],3:['Overcast','☁️'],45:['Fog','🌫️'],48:['Rime fog','🌫️'],51:['Light drizzle','🌦️'],53:['Drizzle','🌦️'],55:['Heavy drizzle','🌧️'],56:['Freezing drizzle','🌧️'],57:['Freezing drizzle','🌧️'],61:['Light rain','🌦️'],63:['Rain','🌧️'],65:['Heavy rain','🌧️'],66:['Freezing rain','🌧️'],67:['Freezing rain','🌧️'],71:['Light snow','🌨️'],73:['Snow','🌨️'],75:['Heavy snow','❄️'],77:['Snow grains','🌨️'],80:['Rain showers','🌦️'],81:['Rain showers','🌧️'],82:['Violent showers','⛈️'],85:['Snow showers','🌨️'],86:['Snow showers','🌨️'],95:['Thunderstorm','⛈️'],96:['Storm + hail','⛈️'],99:['Storm + hail','⛈️']};
+const wmo=c=>WMO[c]||['—','🌥️'];
+
+/* ============== FETCH (resilient: timeout + retries + backup provider) ============== */
+async function fetchJSON(url,opts,tries=2,timeout=12000){
+  for(let i=0;i<tries;i++){
+    let ctrl,to;
+    try{
+      ctrl=new AbortController();to=setTimeout(()=>ctrl.abort(),timeout);
+      const r=await fetch(url,Object.assign({signal:ctrl.signal,cache:'no-store'},opts||{}));
+      clearTimeout(to);
+      if(r.ok)return await r.json();
+    }catch(_){ if(to)clearTimeout(to); }
+    if(i<tries-1)await new Promise(res=>setTimeout(res,500*(i+1))); // brief backoff
+  }
+  return null;
+}
+/* local sunrise/sunset (NOAA low-precision) — used by the backup provider */
+function sunTimes(date,lat,lon){
+  const rad=Math.PI/180,deg=180/Math.PI;
+  const d=Math.floor((Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())/86400000)-10957.5)+2451545; // Julian day approx
+  const n=d-2451545.0+0.0008;
+  const Jstar=n-lon/360;
+  const M=((357.5291+0.98560028*Jstar)%360+360)%360;
+  const C=1.9148*Math.sin(M*rad)+0.0200*Math.sin(2*M*rad)+0.0003*Math.sin(3*M*rad);
+  const L=((M+C+180+102.9372)%360+360)%360;
+  const Jtransit=2451545.0+Jstar+0.0053*Math.sin(M*rad)-0.0069*Math.sin(2*L*rad);
+  const decl=Math.asin(Math.sin(L*rad)*Math.sin(23.44*rad));
+  const cosH=(Math.sin(-0.83*rad)-Math.sin(lat*rad)*Math.sin(decl))/(Math.cos(lat*rad)*Math.cos(decl));
+  if(cosH>1||cosH<-1){const noon=new Date(date);noon.setHours(12,0,0,0);return{sunrise:new Date(noon.getTime()-6*3600000),sunset:new Date(noon.getTime()+6*3600000)};}
+  const H=Math.acos(cosH)*deg;
+  const Jset=Jtransit+H/360, Jrise=Jtransit-H/360;
+  const toDate=J=>new Date((J-2440587.5)*86400000);
+  return{sunrise:toDate(Jrise),sunset:toDate(Jset)};
+}
+/* MET Norway symbol -> WMO-ish code so wmo() icons/labels still work */
+function metSymbolToWmo(s){
+  if(!s)return 3;s=s.replace(/_(day|night|polartwilight)$/,'');
+  const M={clearsky:0,fair:1,partlycloudy:2,cloudy:3,fog:45,lightrainshowers:80,rainshowers:80,heavyrainshowers:82,lightrain:51,rain:63,heavyrain:65,lightsleet:66,sleet:67,heavysleet:67,lightsnow:71,snow:73,heavysnow:75,lightsnowshowers:85,snowshowers:86,rainandthunder:95,rainshowersandthunder:95,heavyrainandthunder:96,thunderstorm:95,sleetandthunder:96,snowandthunder:96};
+  return M[s]!=null?M[s]:3;
+}
+/* Adapt MET Norway Locationforecast 2.0 -> the Open-Meteo shape process() expects */
+function adaptMetNo(j,lat,lon){
+  const ts=j&&j.properties&&j.properties.timeseries;if(!ts||!ts.length)return null;
+  const hourly={time:[],temperature_2m:[],weather_code:[],wind_speed_10m:[],wind_direction_10m:[],wind_gusts_10m:[],surface_pressure:[],precipitation_probability:[]};
+  ts.forEach(e=>{
+    const ins=e.data.instant.details||{};const n1=(e.data.next_1_hours||{});const sum=(n1.summary||{});const det=(n1.details||{});
+    hourly.time.push(e.time);
+    hourly.temperature_2m.push(ins.air_temperature);
+    hourly.weather_code.push(metSymbolToWmo(sum.symbol_code));
+    const ws=ins.wind_speed!=null?ins.wind_speed*3.6:null;
+    hourly.wind_speed_10m.push(ws);
+    hourly.wind_direction_10m.push(ins.wind_from_direction);
+    hourly.wind_gusts_10m.push(ins.wind_speed_of_gust!=null?ins.wind_speed_of_gust*3.6:ws);
+    hourly.surface_pressure.push(ins.air_pressure_at_sea_level);
+    hourly.precipitation_probability.push(det.probability_of_precipitation!=null?det.probability_of_precipitation:0);
+  });
+  const i0=ts[0].data.instant.details||{};const c1=(ts[0].data.next_1_hours||{}).summary||{};
+  const sun0=sunTimes(new Date(),lat,lon);const nowMs=Date.now();
+  const cur={
+    temperature_2m:i0.air_temperature,apparent_temperature:i0.air_temperature,relative_humidity_2m:i0.relative_humidity,
+    is_day:(nowMs>=sun0.sunrise.getTime()&&nowMs<=sun0.sunset.getTime())?1:0,precipitation:0,
+    weather_code:metSymbolToWmo(c1.symbol_code),surface_pressure:i0.air_pressure_at_sea_level,
+    wind_speed_10m:i0.wind_speed!=null?i0.wind_speed*3.6:0,wind_direction_10m:i0.wind_from_direction||0,
+    wind_gusts_10m:i0.wind_speed_of_gust!=null?i0.wind_speed_of_gust*3.6:(i0.wind_speed!=null?i0.wind_speed*3.6:0)
+  };
+  // daily aggregation (group hourly by local date, 7 days)
+  const days={},order=[];
+  hourly.time.forEach((t,k)=>{const dt=new Date(t);const key=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+    if(!days[key]){days[key]={tmax:-99,tmin:99,wmax:0,gmax:0,dirs:[],psum:0,pmax:0,codes:[],noonCode:3};order.push(key);}
+    const D=days[key];const tp=hourly.temperature_2m[k];if(tp!=null){D.tmax=Math.max(D.tmax,tp);D.tmin=Math.min(D.tmin,tp);}
+    const w=hourly.wind_speed_10m[k];if(w!=null)D.wmax=Math.max(D.wmax,w);
+    const g=hourly.wind_gusts_10m[k];if(g!=null)D.gmax=Math.max(D.gmax,g);
+    if(hourly.wind_direction_10m[k]!=null)D.dirs.push(hourly.wind_direction_10m[k]);
+    D.pmax=Math.max(D.pmax,hourly.precipitation_probability[k]||0);
+    D.codes.push(hourly.weather_code[k]);if(dt.getHours()===12)D.noonCode=hourly.weather_code[k];
+  });
+  const daily={time:[],weather_code:[],temperature_2m_max:[],temperature_2m_min:[],sunrise:[],sunset:[],wind_speed_10m_max:[],wind_gusts_10m_max:[],wind_direction_10m_dominant:[],precipitation_sum:[],precipitation_probability_max:[],uv_index_max:[]};
+  order.slice(0,7).forEach(key=>{
+    const D=days[key];const dayDate=new Date(key+'T12:00:00');const st=sunTimes(dayDate,lat,lon);
+    const worst=Math.max.apply(null,D.codes);
+    const dir=D.dirs.length?(D.dirs.reduce((a,b)=>a+b,0)/D.dirs.length):0;
+    daily.time.push(key);daily.weather_code.push(D.noonCode||worst);
+    daily.temperature_2m_max.push(D.tmax);daily.temperature_2m_min.push(D.tmin);
+    daily.sunrise.push(st.sunrise.toISOString());daily.sunset.push(st.sunset.toISOString());
+    daily.wind_speed_10m_max.push(D.wmax);daily.wind_gusts_10m_max.push(D.gmax);
+    daily.wind_direction_10m_dominant.push(dir);daily.precipitation_sum.push(0);
+    daily.precipitation_probability_max.push(D.pmax);daily.uv_index_max.push(null);
+  });
+  return{current:cur,hourly,daily};
+}
+function omForecastUrl(lat,lon){return 'https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon
+  +'&current=temperature_2m,apparent_temperature,relative_humidity_2m,is_day,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m'
+  +'&hourly=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,surface_pressure,precipitation_probability'
+  +'&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,precipitation_sum,precipitation_probability_max,uv_index_max'
+  +'&forecast_days=7&timezone=auto&windspeed_unit=kmh';}
+/* Dedicated per-source URLs — each request is small & independent */
+function omTideUrl(lat,lon){return 'https://marine-api.open-meteo.com/v1/marine?latitude='+lat+'&longitude='+lon+'&hourly=sea_level_height_msl&timezone=auto&forecast_days=3';}
+function omSwellUrl(lat,lon){return 'https://marine-api.open-meteo.com/v1/marine?latitude='+lat+'&longitude='+lon+'&current=wave_height,wave_period,wave_direction,sea_surface_temperature&timezone=auto';}
+function metNoUrl(lat,lon){return 'https://api.met.no/weatherapi/locationforecast/2.0/compact?lat='+lat.toFixed(4)+'&lon='+lon.toFixed(4);}
+
+/* ===== MODULE 1+2: WEATHER + WIND (one source — Open-Meteo / MET Norway) ===== */
+async function getMetNo(lat,lon){const met=await fetchJSON(metNoUrl(lat,lon),{headers:{'User-Agent':'FishOS-AU-Lite/1.0 fishing-app'}},2,12000);if(met){try{const a=adaptMetNo(met,lat,lon);if(a&&a.current)return a;}catch(_){}}return null;}
+async function getForecast(lat,lon,vendor){
+  let f=null,src='';
+  if(vendor==='metno'){
+    f=await getMetNo(lat,lon);src='MET Norway';
+    if(!f){f=await fetchJSON(omForecastUrl(lat,lon),null,2,12000);src='Open-Meteo (backup)';}
+  }else{
+    f=await fetchJSON(omForecastUrl(lat,lon),null,2,12000);src='Open-Meteo';
+    if((!f||!f.current)&&vendor!=='openmeteo'){const a=await getMetNo(lat,lon);if(a){f=a;src='MET Norway (backup)';}}
+  }
+  return (f&&f.current)?{f,src}:null;
+}
+/* ===== MODULE 3: TIDES (dedicated, model-backed — never throws) ===== */
+async function getTides(lat,lon){
+  const j=await fetchJSON(omTideUrl(lat,lon),null,2,12000);
+  if(j&&j.hourly&&j.hourly.sea_level_height_msl&&j.hourly.sea_level_height_msl.filter(v=>v!=null).length>=6)return j;
+  return null; // caller falls back to the local lunar model
+}
+/* ===== MODULE 4: SWELL / sea temp (optional) ===== */
+async function getSwell(lat,lon){return await fetchJSON(omSwellUrl(lat,lon),null,2,12000);}
+
+/* ===== ORCHESTRATOR: fetch all modules IN PARALLEL; each fails independently ===== */
+async function fetchConditions(lat,lon){
+  const vendor=STATE.vendor||'auto';
+  const [wRes,tRes,sRes]=await Promise.allSettled([getForecast(lat,lon,vendor),getTides(lat,lon),getSwell(lat,lon)]);
+  const w=wRes.status==='fulfilled'?wRes.value:null;
+  const tide=tRes.status==='fulfilled'?tRes.value:null;
+  const swell=sRes.status==='fulfilled'?sRes.value:null;
+  if(!w)throw new Error('weather'); // weather+wind is the only hard dependency for the score
+  // merge marine pieces (either/both may be present); tides fall back to lunar model in process()
+  let m=null;
+  if((tide&&tide.hourly)||(swell&&swell.current)){m={};if(swell&&swell.current)m.current=swell.current;if(tide&&tide.hourly)m.hourly=tide.hourly;}
+  const d=process(lat,lon,w.f,m);
+  d.src=w.src;
+  d.status={weather:true,wind:true,tide:d.tide&&d.tide.real?'live':'modelled',swell:!!(swell&&swell.current)};
+  return d;
+}
+/* Connection test — pings each source so you can see what a firewall is blocking */
+async function testSources(lat,lon){
+  const checks=[
+    ['Weather/Wind (Open-Meteo)',omForecastUrl(lat,lon)],
+    ['Tides (Open-Meteo Marine)',omTideUrl(lat,lon)],
+    ['Swell (Open-Meteo Marine)',omSwellUrl(lat,lon)],
+    ['Weather backup (MET Norway)',metNoUrl(lat,lon)],
+    ['Place search (Open-Meteo Geo)','https://geocoding-api.open-meteo.com/v1/search?name=sydney&count=1&countryCode=AU'],
+    ['Maps tiles (OpenStreetMap)','https://a.tile.openstreetmap.org/5/29/19.png']
+  ];
+  return Promise.all(checks.map(async([name,url])=>{
+    const t0=Date.now();
+    try{const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),9000);
+      const r=await fetch(url,{signal:ctrl.signal,cache:'no-store'});clearTimeout(to);
+      return{name,ok:r.ok,code:r.status,ms:Date.now()-t0};
+    }catch(e){return{name,ok:false,code:(e&&e.name==='AbortError')?'timeout':'blocked',ms:Date.now()-t0};}
+  }));
+}
+function nearestHourIdx(times,now){let best=0,bd=Infinity;for(let i=0;i<times.length;i++){const d=Math.abs(new Date(times[i])-now);if(d<bd){bd=d;best=i;}}return best;}
+function solunarStrength(now,sol){let best=0;const consider=[...sol.majors.map(p=>({...p,w:1})),...sol.minors.map(p=>({...p,w:0.6}))];
+  for(const p of consider){const dt=Math.abs(now-p.t)/60000,half=p.len/2;if(dt<=half){const c=1-(dt/half);best=Math.max(best,p.w*(0.5+0.5*c));}}return clamp(0.18+best,0,1);}
+
+function process(lat,lon,f,m){
+  const now=new Date(),cur=f.current,moon=moonInfo(now),sol=solunarPeriods(now,lat,lon);
+  const tideReal=tidesFromSeaLevel(m,now);
+  const tide=tideReal||tideModel(now,lat,lon);
+  const tideHourly=(tideReal&&m&&m.hourly&&m.hourly.sea_level_height_msl)?{time:m.hourly.time,h:m.hourly.sea_level_height_msl}:null;
+  const month=now.getMonth()+1,hour=now.getHours()+now.getMinutes()/60;
+  const sr=new Date(f.daily.sunrise[0]),ss=new Date(f.daily.sunset[0]);
+  const isDawnDusk=(Math.abs(hour-(sr.getHours()+sr.getMinutes()/60))<1.25)||(Math.abs(hour-(ss.getHours()+ss.getMinutes()/60))<1.25);
+  let wave=null,wavePeriod=null,waterTemp=null;
+  if(m&&m.current){wave=m.current.wave_height;wavePeriod=m.current.wave_period;waterTemp=m.current.sea_surface_temperature;}
+  let pressTrend='steady',pTrendVal=0;
+  try{const i=nearestHourIdx(f.hourly.time,now);const p0=f.hourly.surface_pressure[i];const p3=f.hourly.surface_pressure[Math.min(i+3,f.hourly.surface_pressure.length-1)];pTrendVal=p3-p0;pressTrend=pTrendVal>1.2?'rising':(pTrendVal<-1.2?'falling':'steady');}catch(_){}
+  const factors=[];let score=50;
+  const solScore=solunarStrength(now,sol);score+=(solScore-0.5)*44;
+  if(solScore>0.66)factors.push(['Solunar peak','good']);else if(solScore<0.25)factors.push(['Off solunar','bad']);
+  if(isDawnDusk){score+=10;factors.push(['Low-light window','good']);}
+  const wspd=cur.wind_speed_10m;
+  if(wspd<6)score+=2;else if(wspd<=22){score+=8;factors.push(['Workable wind','good']);}else if(wspd<=32){score-=6;factors.push(['Fresh wind','warn']);}else{score-=18;factors.push(['Strong wind','bad']);}
+  if(pressTrend==='falling'){score+=8;factors.push(['Falling barometer','good']);}else if(pressTrend==='rising'&&cur.surface_pressure>1023){score-=5;factors.push(['High & rising','warn']);}
+  if(moon.phase==='New Moon'||moon.phase==='Full Moon'){score+=7;factors.push([moon.phase,'good']);}
+  const wc=cur.weather_code;
+  if([95,96,99,82].includes(wc)){score-=16;factors.push(['Storms about','bad']);}else if([65,67,75,86].includes(wc)){score-=8;factors.push(['Heavy rain','warn']);}else if([1,2,3,45,51,53,61,80].includes(wc))score+=4;
+  if(wave!=null){if(wave<=1.2)score+=4;else if(wave<=2.0){}else if(wave<=3.0){score-=8;factors.push(['Big swell','warn']);}else{score-=16;factors.push(['Dangerous swell','bad']);}}
+  score=Math.round(clamp(score,3,99));
+  const timeBucket=isDawnDusk?(hour<(sr.getHours()+2)?'dawn':'dusk'):(cur.is_day?'day':'night');
+  const speciesScored=SPECIES.map(sp=>{
+    let pr=0.30;
+    if(sp.season.includes(month))pr+=0.26;else pr-=0.10;
+    if(sp.time.includes(timeBucket))pr+=0.16;
+    if(isDawnDusk&&(sp.time.includes('dawn')||sp.time.includes('dusk')))pr+=0.06;
+    if(wspd<=sp.wind)pr+=0.12;else pr-=Math.min(0.22,(wspd-sp.wind)/120);
+    if(sp.tide===tide.state.toLowerCase()||(sp.tide==='run-in'&&tide.dir==='rising')||(sp.tide==='run-out'&&tide.dir==='falling')||(sp.tide==='tide-change'&&(tide.state==='High'||tide.state==='Low')))pr+=0.10;
+    if((sp.key==='mulloway'||sp.key==='jewfish'||sp.key==='snapper')&&(moon.phase==='New Moon'||moon.phase==='Full Moon'))pr+=0.07;
+    pr+=(score-50)/360;pr=clamp(pr,0.04,0.97);
+    return{...sp,prob:Math.round(pr*100),timeBucket};
+  }).sort((a,b)=>b.prob-a.prob);
+  const top3=speciesScored.slice(0,3);const baitTally={};top3.forEach(s=>s.baits.slice(0,3).forEach(b=>{baitTally[b]=(baitTally[b]||0)+1;}));
+  const bestBaits=Object.entries(baitTally).sort((a,b)=>b[1]-a[1]).slice(0,4).map(x=>x[0]);
+  const safety=[];
+  if(wspd>=35||cur.wind_gusts_10m>=45)safety.push(['danger','Strong wind '+round(wspd)+' km/h (gusts '+round(cur.wind_gusts_10m)+'). Small boats stay in — rock fishing is dangerous.']);
+  else if(wspd>=25)safety.push(['warn','Fresh breeze '+round(wspd)+' km/h. Chop building — secure gear, watch exposed ledges.']);
+  if(wave!=null&&wave>=3)safety.push(['danger','Hazardous swell '+round(wave,1)+' m. Do NOT rock or platform fish. Beaches will have strong rips.']);
+  else if(wave!=null&&wave>=2)safety.push(['warn','Swell '+round(wave,1)+' m. Caution on low rock ledges; watch for surprise sets.']);
+  if([95,96,99,82].includes(wc))safety.push(['danger','Thunderstorm risk — lightning. Get off the water and away from graphite rods.']);
+  if(f.daily.uv_index_max&&f.daily.uv_index_max[0]>=8&&cur.is_day)safety.push(['warn','Extreme UV '+round(f.daily.uv_index_max[0])+'. Hat, long sleeves, SPF50+, stay hydrated.']);
+  if(waterTemp!=null&&waterTemp<16)safety.push(['warn','Cold water '+round(waterTemp,1)+'°C — wear a PFD; hypothermia risk if you go in.']);
+  safety.push(['info','Tell someone your plan. Wear a lifejacket on rocks &amp; in boats. Never turn your back on the sea.']);
+  const daily=f.daily.time.map((t,i)=>{
+    const wsd=f.daily.wind_speed_10m_max[i],code=f.daily.weather_code[i];let ds=55;
+    if(wsd<=22)ds+=10;else if(wsd<=32)ds-=6;else ds-=18;
+    if([95,96,99,82].includes(code))ds-=16;else if([0,1,2,3].includes(code))ds+=6;
+    if(f.daily.precipitation_probability_max[i]>70)ds-=6;
+    const dM=moonInfo(new Date(t+'T12:00:00'));if(dM.phase==='New Moon'||dM.phase==='Full Moon')ds+=6;
+    ds=Math.round(clamp(ds,5,98));
+    return{date:new Date(t+'T00:00:00'),code,ds,tmax:f.daily.temperature_2m_max[i],tmin:f.daily.temperature_2m_min[i],wind:wsd,gust:f.daily.wind_gusts_10m_max[i],windDir:f.daily.wind_direction_10m_dominant[i],rainP:f.daily.precipitation_probability_max[i],uv:f.daily.uv_index_max?f.daily.uv_index_max[i]:null,sunrise:new Date(f.daily.sunrise[i]),sunset:new Date(f.daily.sunset[i]),moon:dM};
+  });
+  return{lat,lon,now:now.getTime(),cur,moon,sol,tide,tideHourly,score,factors,speciesScored,top3,bestBaits,safety,daily,wave,wavePeriod,waterTemp,pressTrend,pTrendVal,sunrise:sr.getTime(),sunset:ss.getTime(),isDawnDusk,timeBucket,hourly:f.hourly,fetchedAt:Date.now()};
+}
+
+/* ============== RENDER ============== */
+function scoreColor(s){return s>=70?'#34d399':s>=45?'#f59e0b':'#ef4444';}
+function scoreWord(s){return s>=80?'Prime — go fishing':s>=65?'Good bite expected':s>=45?'Fair — give it a crack':s>=28?'Slow — tough going':'Poor — maybe tie rigs';}
+
+function render(d,stale){
+  STATE.data=d;
+  const now=new Date(d.now),sunrise=new Date(d.sunrise),sunset=new Date(d.sunset);
+  const sb=$('#staleBar');
+  if(stale){sb.classList.remove('hidden');sb.innerHTML='<span class="w-1.5 h-1.5 rounded-full bg-warn pulse"></span>Showing last saved conditions ('+ago(d.fetchedAt)+') — refreshing…';}
+  else sb.classList.add('hidden');
+  const ut=$('#updatedTxt');if(ut)ut.textContent=(stale?'Saved ':'Updated ')+ago(d.fetchedAt)+(d.src?(' · '+d.src.replace(' (backup)','')):'')+(d.status?(' · tide '+d.status.tide+(d.status.swell?'':' · no swell')):'');
+
+  const ring=$('#scoreRing'),C=2*Math.PI*52;ring.style.strokeDasharray=C;ring.style.strokeDashoffset=C*(1-d.score/100);ring.style.stroke=scoreColor(d.score);
+  animateNum($('#scoreNum'),d.score);
+  $('#scoreLabel').textContent=scoreWord(d.score);
+  $('#scoreSub').textContent=seasonName(now.getMonth()+1)+' · '+fmtTime(now)+' · '+(d.cur.is_day?'daylight':'after dark');
+  $('#scoreFactors').innerHTML=d.factors.slice(0,4).map(([t,k])=>{const c=k==='good'?'text-brand border-brand/40':k==='warn'?'text-warn border-warn/40':k==='bad'?'text-danger border-danger/40':'text-muted border-line';return '<span class="chip '+c+' rounded-full px-2 py-0.5 text-[11px] border">'+t+'</span>';}).join('');
+
+  $('#windVal').textContent=windDisp(d.cur.wind_speed_10m);$('#windUnit').textContent=windUnitLabel();
+  $('#windDir').textContent=compass(d.cur.wind_direction_10m)+' '+round(d.cur.wind_direction_10m)+'°';
+  $('#windArrow').style.transform='rotate('+(d.cur.wind_direction_10m+180)+'deg)';
+  $('#windGust').textContent='gust '+windDisp(d.cur.wind_gusts_10m);
+  $('#temp').textContent=round(d.cur.temperature_2m);
+  const [desc,em]=wmo(d.cur.weather_code);$('#wxEmoji').textContent=em;$('#wxDesc').textContent=desc+' · feels '+round(d.cur.apparent_temperature)+'°';
+  $('#wave').textContent=d.wave!=null?round(d.wave,1):'—';$('#wavePeriod').textContent=d.wavePeriod!=null?('period '+round(d.wavePeriod)+'s'):'no marine data here';
+  $('#moonEmoji').textContent=d.moon.emoji;$('#moonIllum').textContent=d.moon.illumPct;$('#moonPhase').textContent=d.moon.phase;
+  $('#pressure').textContent=round(d.cur.surface_pressure);$('#pressTrend').textContent=d.pressTrend+(d.pTrendVal?(' '+(d.pTrendVal>0?'+':'')+round(d.pTrendVal,1)):'');
+  $('#tideState').textContent=d.tide.state;
+  if(d.tide.real){const nh=d.tide.nextHigh,nl=d.tide.nextLow;const parts=[];if(nh)parts.push('H '+fmtTime(new Date(nh.t)));if(nl)parts.push('L '+fmtTime(new Date(nl.t)));$('#tideNext').textContent=parts.join(' · ')||'—';}
+  else $('#tideNext').textContent='next '+d.tide.nextType+' ~'+fmtTime(new Date(d.tide.nextT));
+  $('#tideLive').classList.toggle('hidden',!d.tide.real);
+  $('#waterTemp').textContent=d.waterTemp!=null?round(d.waterTemp,1):'—';$('#uvIndex').textContent='UV '+(d.daily[0].uv!=null?round(d.daily[0].uv):'—');
+
+  const sbx=$('#safetyBox');const hasDanger=d.safety.some(s=>s[0]==='danger'),hasWarn=d.safety.some(s=>s[0]==='warn');
+  sbx.className='border rounded-2xl p-3.5 fade-in '+(hasDanger?'border-danger/50 bg-danger/10':hasWarn?'border-warn/50 bg-warn/10':'border-line glass');
+  sbx.innerHTML='<div class="flex items-center gap-2 mb-2 font-bold text-sm"><svg class="w-4 h-4 '+(hasDanger?'text-danger':hasWarn?'text-warn':'text-brand')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>Safety &amp; Conditions</div><ul class="space-y-1.5 text-[12.5px]">'+d.safety.map(([k,t])=>{const dot=k==='danger'?'bg-danger':k==='warn'?'bg-warn':'bg-brand';return '<li class="flex gap-2"><span class="mt-1.5 w-1.5 h-1.5 rounded-full '+dot+' shrink-0"></span><span class="'+(k==='danger'?'text-red-200':k==='warn'?'text-amber-100':'text-muted')+'">'+t+'</span></li>';}).join('')+'</ul>';
+  sbx.classList.remove('hidden');
+
+  const periods=[...d.sol.majors,...d.sol.minors].map(p=>({...p,t:new Date(p.t)}));
+  const lightWins=[{label:'Dawn',t:sunrise,len:90,light:true},{label:'Dusk',t:sunset,len:90,light:true}];
+  const allWins=[...periods,...lightWins].sort((a,b)=>a.t-b.t);const nowMs=now.getTime();
+  $('#biteTimes').innerHTML=allWins.map(p=>{const end=new Date(p.t.getTime()+p.len*60000);const active=nowMs>=p.t.getTime()-p.len*30000&&nowMs<=end.getTime();const major=p.label==='Major',light=p.light;const color=light?'text-brand2':major?'text-brand':'text-amber-300';const bg=active?'ring-1 ring-brand/60 bg-brand/10':'';const icon=light?'☀️':major?'⭐':'✨';return '<div class="chip rounded-xl p-2.5 '+bg+'"><div class="flex items-center gap-1.5 text-[11px] '+color+' font-semibold">'+icon+' '+p.label+(active?' · NOW':'')+'</div><div class="text-sm font-bold mt-0.5">'+fmtTime(p.t)+'</div><div class="text-[11px] text-muted">to '+fmtTime(end)+'</div></div>';}).join('');
+
+  $('#topSpecies').innerHTML=d.top3.map(speciesRow).join('');
+  $('#baitPlan').innerHTML='<div class="flex flex-wrap gap-1.5 mb-1">'+d.bestBaits.map(b=>'<span class="chip rounded-full px-2.5 py-1 text-[12px]">'+esc(b)+'</span>').join('')+'</div>'+d.top3.map(s=>'<div class="flex gap-2 items-start"><span class="text-base leading-none mt-0.5">'+s.emoji+'</span><div><span class="font-semibold text-[13px]">'+s.name+'</span> <span class="text-muted text-[12px]">— '+esc(s.rig)+'</span></div></div>').join('');
+
+  $('#miniForecast').innerHTML=
+    '<div class="flex items-center gap-2 px-2.5 pb-1 text-[9px] uppercase tracking-wider text-muted"><div class="w-12 shrink-0">Day</div><div class="w-6 text-center shrink-0">Sky</div><div class="w-11 shrink-0">Hi/Lo</div><div class="flex-1 text-right">Wind</div><div class="w-8 text-right shrink-0">Rain</div><div class="w-7 text-right shrink-0">Bite</div></div>'
+    +d.daily.slice(0,5).map((dd,i)=>{
+    const lbl=i===0?'Today':i===1?'Tmrw':dd.date.toLocaleDateString('en-AU',{weekday:'short'});
+    return '<div class="flex items-center gap-2 chip rounded-xl px-2.5 py-2 text-[12px]">'
+      +'<div class="w-12 shrink-0 truncate '+(i===0?'text-brand font-semibold':'')+'">'+lbl+'</div>'
+      +'<div class="text-lg w-6 text-center shrink-0" title="'+esc(wmo(dd.code)[0])+'">'+wmo(dd.code)[1]+'</div>'
+      +'<div class="w-11 shrink-0 whitespace-nowrap">'+round(dd.tmax)+'°<span class="text-muted">'+round(dd.tmin)+'°</span></div>'
+      +'<div class="text-[11px] text-muted flex items-center gap-1 flex-1 min-w-0 justify-end"><svg class="w-3 h-3 shrink-0" style="transform:rotate('+(dd.windDir+180)+'deg)" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 9h-3v11h-2V11H8z"/></svg>'+windDisp(dd.wind)+'</div>'
+      +'<div class="text-[11px] text-brand2 w-8 text-right shrink-0">'+round(dd.rainP)+'%</div>'
+      +'<div class="w-7 text-right font-bold shrink-0" style="color:'+scoreColor(dd.ds)+'">'+dd.ds+'</div>'
+    +'</div>';}).join('')
+    +'<div class="text-[10px] text-muted mt-1 px-1">Wind in '+windUnitLabel()+' · Bite = fishing score</div>';
+
+  renderNearSpots();
+  renderSpeciesView(d);
+  renderForecastView(d);
+  renderTide48(d);
+  drawHourChart(d);
+  drawTideChart48(d);
+}
+function speciesRow(s){return '<div class="flex items-center gap-3 chip rounded-xl p-2.5"><div class="text-2xl shrink-0">'+s.emoji+'</div><div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2"><span class="font-semibold text-sm truncate">'+s.name+'</span><span class="text-sm font-bold shrink-0" style="color:'+scoreColor(s.prob)+'">'+s.prob+'%</span></div><div class="mt-1 h-1.5 rounded-full bg-line overflow-hidden"><div class="h-full rounded-full" style="width:'+s.prob+'%;background:'+scoreColor(s.prob)+'"></div></div><div class="text-[11px] text-muted mt-1 truncate">'+esc(s.baits[0])+' · '+s.tide+'</div></div></div>';}
+
+function renderSpeciesView(d){
+  $('#speciesLoc').textContent=STATE.loc?STATE.loc.name:'your spot';const month=new Date(d.now).getMonth()+1;
+  $('#speciesList').innerHTML=d.speciesScored.map(s=>{const inSeason=s.season.includes(month);
+    return '<div class="glass border border-line rounded-2xl p-4 fade-in"><div class="flex items-center gap-3"><div class="text-3xl">'+s.emoji+'</div><div class="flex-1 min-w-0"><div class="flex items-center gap-2"><span class="font-bold">'+s.name+'</span>'+(inSeason?'<span class="text-[10px] chip border border-brand/40 text-brand rounded-full px-1.5 py-0.5">in season</span>':'<span class="text-[10px] chip text-muted rounded-full px-1.5 py-0.5">off-peak</span>')+'</div><div class="text-[11px] text-muted italic">'+s.sci+'</div></div><div class="text-right"><div class="text-2xl font-extrabold" style="color:'+scoreColor(s.prob)+'">'+s.prob+'<span class="text-sm">%</span></div><div class="text-[10px] text-muted">probability</div></div></div><div class="mt-2 h-2 rounded-full bg-line overflow-hidden"><div class="h-full rounded-full" style="width:'+s.prob+'%;background:'+scoreColor(s.prob)+'"></div></div><div class="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-3 text-[12px]">'+kv('Best bait',esc(s.baits.slice(0,2).join(', ')))+kv('Tide',s.tide)+kv('Best time',s.time.join(' / '))+kv('Season',s.season.map(m=>['','J','F','M','A','M','J','J','A','S','O','N','D'][m]).join(''))+'</div><div class="mt-3 chip rounded-xl p-2.5 text-[12px]"><span class="text-brand font-semibold">Rig:</span> '+esc(s.rig)+'</div><div class="mt-2 text-[12px] text-muted leading-relaxed">'+esc(s.tip)+'</div></div>';}).join('');
+}
+function kv(k,v){return '<div><div class="text-muted text-[10px] uppercase tracking-wide">'+k+'</div><div class="font-medium">'+v+'</div></div>';}
+
+function renderForecastView(d){
+  // best-day banner
+  const best=d.daily.reduce((a,b)=>b.ds>a.ds?b:a,d.daily[0]);const bestIdx=d.daily.indexOf(best);
+  const bb=$('#bestDayBanner');
+  if(best.ds>=55){const lbl=bestIdx===0?'today':bestIdx===1?'tomorrow':best.date.toLocaleDateString('en-AU',{weekday:'long'});
+    bb.innerHTML='<div class="flex items-center gap-3"><div class="text-2xl">🎯</div><div class="flex-1"><div class="font-bold">Best day this week: <span class="capitalize">'+lbl+'</span></div><div class="text-[12px] text-muted">Score '+best.ds+' · '+wmo(best.code)[0]+' · wind '+windDisp(best.wind)+' '+windUnitLabel()+' · '+best.moon.emoji+' '+best.moon.phase+'</div></div><div class="text-2xl font-extrabold" style="color:'+scoreColor(best.ds)+'">'+best.ds+'</div></div>';bb.classList.remove('hidden');}
+  else bb.classList.add('hidden');
+
+  const t=d.daily[1];
+  $('#tomorrowBox').innerHTML='<div class="flex items-center gap-3"><span class="text-3xl">'+wmo(t.code)[1]+'</span><div><div class="text-white font-bold">'+round(t.tmax)+'° / '+round(t.tmin)+'° · '+wmo(t.code)[0]+'</div><div class="text-[12px]">Wind '+compass(t.windDir)+' '+windDisp(t.wind)+' '+windUnitLabel()+' · Rain '+round(t.rainP)+'%</div><div class="text-[12px]">Score <span class="font-bold" style="color:'+scoreColor(t.ds)+'">'+t.ds+'</span> · '+t.moon.emoji+' '+t.moon.phase+'</div></div></div>';
+  const wknd=d.daily.filter(x=>[0,6].includes(x.date.getDay())).slice(0,2);
+  $('#weekendBox').innerHTML=(wknd.length?wknd:d.daily.slice(5,7)).map(x=>'<div class="chip rounded-xl p-3 text-center"><div class="text-[12px] text-muted">'+x.date.toLocaleDateString('en-AU',{weekday:'long'})+'</div><div class="text-3xl my-1">'+wmo(x.code)[1]+'</div><div class="text-sm">'+round(x.tmax)+'° / '+round(x.tmin)+'°</div><div class="text-[11px] text-muted">Wind '+windDisp(x.wind)+' · Rain '+round(x.rainP)+'%</div><div class="mt-1 font-bold" style="color:'+scoreColor(x.ds)+'">Score '+x.ds+'</div></div>').join('');
+  $('#weekForecast').innerHTML=d.daily.map((x,i)=>{const lbl=i===0?'Today':x.date.toLocaleDateString('en-AU',{weekday:'short',day:'numeric'});const isBest=i===bestIdx&&best.ds>=55;return '<div class="flex items-center gap-3 chip rounded-xl p-2.5 '+(isBest?'ring-1 ring-brand/50':'')+'"><div class="w-16 text-[12px] '+(i===0?'text-brand font-semibold':'text-muted')+'">'+lbl+(isBest?' 🎯':'')+'</div><div class="text-xl w-7 text-center">'+wmo(x.code)[1]+'</div><div class="text-[12px] w-16">'+round(x.tmax)+'° / '+round(x.tmin)+'°</div><div class="text-[11px] text-muted flex-1 flex items-center gap-1"><svg class="w-3 h-3" style="transform:rotate('+(x.windDir+180)+'deg)" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 9h-3v11h-2V11H8z"/></svg>'+windDisp(x.wind)+'</div><div class="w-10 text-right text-[11px]">'+x.moon.emoji+'</div><div class="w-9 text-right font-bold text-sm" style="color:'+scoreColor(x.ds)+'">'+x.ds+'</div></div>';}).join('');
+}
+function drawHourChart(d){
+  const cv=$('#hourChart');if(!cv)return;const ctx=cv.getContext('2d');
+  const W=cv.width=cv.clientWidth*devicePixelRatio,H=cv.height=150*devicePixelRatio;ctx.clearRect(0,0,W,H);
+  const idx=nearestHourIdx(d.hourly.time,new Date(d.now));const wind=d.hourly.wind_speed_10m.slice(idx,idx+24);const times=d.hourly.time.slice(idx,idx+24);
+  if(!wind.length)return;const maxW=Math.max(...wind,10);const pad=20*devicePixelRatio;
+  const muted=(getComputedStyle(document.documentElement).getPropertyValue('--muted').trim())||'#7c8aa5';
+  // ---- tide: real sea-level series if available, else lunar model ----
+  let tnorm=null,realTide=false;
+  if(d.tide&&d.tide.real&&d.tideHourly){const map={};d.tideHourly.time.forEach((t,k)=>{map[t]=d.tideHourly.h[k];});const hs=times.map(t=>map[t]);if(hs.every(v=>v!=null)){const mn=Math.min(...hs),mx=Math.max(...hs),rng=(mx-mn)||1;tnorm=hs.map(v=>(v-mn)/rng);realTide=true;}}
+  if(!tnorm)tnorm=times.map(t=>(tideModel(new Date(t),d.lat,d.lon).height+1)/2);
+  ctx.lineWidth=2*devicePixelRatio;ctx.strokeStyle='#22d3ee';ctx.beginPath();
+  for(let i=0;i<24;i++){const x=pad+(W-2*pad)*i/23;const y=H-pad-tnorm[i]*(H-2*pad);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.stroke();
+  const bw=(W-2*pad)/24*0.6;
+  for(let i=0;i<24;i++){const x=pad+(W-2*pad)*i/23;const h=(wind[i]/maxW)*(H-2*pad);const c=wind[i]<=22?'#34d399':wind[i]<=32?'#f59e0b':'#ef4444';ctx.fillStyle=c;ctx.globalAlpha=.85;ctx.fillRect(x-bw/2,H-pad-h,bw,h);}
+  ctx.globalAlpha=1;ctx.fillStyle=muted;ctx.font=(10*devicePixelRatio)+'px system-ui';ctx.textAlign='center';
+  for(let i=0;i<24;i+=6){const x=pad+(W-2*pad)*i/23;ctx.fillText(new Date(times[i]).getHours()+'h',x,H-4*devicePixelRatio);}
+  ctx.textAlign='left';ctx.fillStyle='#22d3ee';ctx.fillText('— Tide'+(realTide?' (live)':' (modelled)'),pad,12*devicePixelRatio);ctx.fillStyle='#34d399';ctx.fillText('▮ Wind '+windUnitLabel(),pad+96*devicePixelRatio,12*devicePixelRatio);
+}
+function animateNum(el,to){const from=parseInt(el.textContent)||0,dur=600,t0=performance.now();function step(t){const p=clamp((t-t0)/dur,0,1);el.textContent=Math.round(from+(to-from)*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(step);}requestAnimationFrame(step);}
+
+/* ============== 48-HOUR TIDES ============== */
+/* Build an hourly tide series for the next ~48h — real sea-level if available, else lunar model. */
+function tideSeries48(d){
+  const now=d.now,end=now+48*3600000,out=[];
+  if(d.tide&&d.tide.real&&d.tideHourly){
+    const T=d.tideHourly.time,Hh=d.tideHourly.h;
+    for(let i=0;i<T.length;i++){const t=new Date(T[i]).getTime();if(t>=now-3600000&&t<=end&&Hh[i]!=null)out.push({t,h:Hh[i]});}
+    if(out.length>=6)return{pts:out,real:true};
+  }
+  const m=[];for(let k=0;k<=48;k++){const t=now+k*3600000;m.push({t,h:tideModel(new Date(t),d.lat,d.lon).height});}
+  return{pts:m,real:false};
+}
+/* High/Low turning points with parabolic refinement for sub-hour precision. */
+function tideExtrema(pts){
+  const ev=[];
+  for(let i=1;i<pts.length-1;i++){
+    const a=pts[i-1].h,b=pts[i].h,c=pts[i+1].h;
+    const isHigh=b>=a&&b>=c&&(b>a||b>c),isLow=b<=a&&b<=c&&(b<a||b<c);
+    if(!isHigh&&!isLow)continue;
+    const denom=(a-2*b+c);let off=denom!==0?0.5*(a-c)/denom:0;off=clamp(off,-0.5,0.5);
+    const dt=pts[i+1].t-pts[i].t;
+    ev.push({type:isHigh?'High':'Low',t:pts[i].t+off*dt,h:b-0.25*(a-c)*off});
+  }
+  return ev;
+}
+function drawTideChart48(d){
+  const cv=$('#tideChart48');if(!cv)return;const ctx=cv.getContext('2d');const dpr=devicePixelRatio;
+  const W=cv.width=cv.clientWidth*dpr,H=cv.height=140*dpr;ctx.clearRect(0,0,W,H);
+  const ser=tideSeries48(d);const pts=ser.pts;if(pts.length<2)return;
+  const t0=pts[0].t,t1=pts[pts.length-1].t,span=(t1-t0)||1;
+  const hs=pts.map(p=>p.h);const mn=Math.min(...hs),mx=Math.max(...hs),rng=(mx-mn)||1;
+  const padX=10*dpr,padTop=14*dpr,padBot=20*dpr;
+  const X=t=>padX+(W-2*padX)*(t-t0)/span;
+  const Y=h=>padTop+(H-padTop-padBot)*(1-(h-mn)/rng);
+  const muted=(getComputedStyle(document.documentElement).getPropertyValue('--muted').trim())||'#7c8aa5';
+  const lineCol=(getComputedStyle(document.documentElement).getPropertyValue('--line').trim())||'#1e2c44';
+  // midnight day dividers + weekday labels
+  ctx.font=(10*dpr)+'px system-ui';ctx.textAlign='left';
+  for(let i=0;i<pts.length;i++){const dt=new Date(pts[i].t);if(dt.getHours()===0){const x=X(pts[i].t);ctx.strokeStyle=lineCol;ctx.lineWidth=1*dpr;ctx.beginPath();ctx.moveTo(x,padTop);ctx.lineTo(x,H-padBot);ctx.stroke();ctx.fillStyle=muted;ctx.fillText(dt.toLocaleDateString('en-AU',{weekday:'short'}),x+3*dpr,H-7*dpr);}}
+  // filled area under curve
+  ctx.beginPath();pts.forEach((p,i)=>{const x=X(p.t),y=Y(p.h);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.lineTo(X(t1),H-padBot);ctx.lineTo(X(t0),H-padBot);ctx.closePath();
+  const grad=ctx.createLinearGradient(0,padTop,0,H-padBot);grad.addColorStop(0,'rgba(34,211,238,.28)');grad.addColorStop(1,'rgba(34,211,238,0)');ctx.fillStyle=grad;ctx.fill();
+  // tide line
+  ctx.beginPath();pts.forEach((p,i)=>{const x=X(p.t),y=Y(p.h);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.strokeStyle='#22d3ee';ctx.lineWidth=2*dpr;ctx.stroke();
+  // now marker
+  const nx=X(d.now);ctx.strokeStyle='#34d399';ctx.setLineDash([4*dpr,3*dpr]);ctx.beginPath();ctx.moveTo(nx,padTop);ctx.lineTo(nx,H-padBot);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#34d399';ctx.textAlign=nx<W*0.12?'left':'center';ctx.fillText('now',nx+(nx<W*0.12?2*dpr:0),11*dpr);
+  // High/Low dots
+  tideExtrema(pts).filter(e=>e.t>=d.now-3600000).forEach(e=>{const x=X(e.t),y=Y(e.h);ctx.fillStyle=e.type==='High'?'#34d399':'#f59e0b';ctx.beginPath();ctx.arc(x,y,3*dpr,0,7);ctx.fill();});
+}
+function renderTide48(d){
+  const host=$('#tide48List');if(!host)return;
+  const ser=tideSeries48(d);const real=ser.real;
+  const src=$('#tide48Src');if(src){src.textContent=real?'live':'modelled';src.className='text-[11px] '+(real?'text-brand':'text-muted');}
+  let ev=tideExtrema(ser.pts).filter(e=>e.t>=d.now-30*60000&&e.t<=d.now+48*3600000).sort((a,b)=>a.t-b.t);
+  if(!ev.length){host.innerHTML='<div class="text-[12px] text-muted">Tide times unavailable for this spot.</div>';return;}
+  const todayKey=new Date(d.now).toDateString(),tomKey=new Date(d.now+86400000).toDateString();
+  const groups={},order=[];
+  ev.forEach(e=>{const k=new Date(e.t).toDateString();if(!groups[k]){groups[k]=[];order.push(k);}groups[k].push(e);});
+  host.innerHTML=order.map(k=>{
+    const lbl=k===todayKey?'Today':k===tomKey?'Tomorrow':new Date(k).toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
+    return '<div class="mb-2.5"><div class="text-[11px] uppercase tracking-wider text-muted mb-1">'+lbl+'</div><div class="grid grid-cols-2 gap-1.5">'+groups[k].map(e=>{
+      const up=e.type==='High',col=up?'text-brand':'text-warn';
+      const ht=real?(' · '+(e.h>=0?'+':'')+e.h.toFixed(2)+' m'):'';
+      return '<div class="chip rounded-lg px-2.5 py-1.5 flex items-center gap-2"><span class="'+col+' text-sm leading-none">'+(up?'▲':'▼')+'</span><div class="min-w-0"><div class="text-[13px] font-semibold leading-none">'+(up?'High':'Low')+'</div><div class="text-[11px] text-muted mt-0.5 truncate">'+fmtTime(new Date(e.t))+ht+'</div></div></div>';
+    }).join('')+'</div></div>';
+  }).join('')+(real?'':'<div class="text-[11px] text-muted">Modelled — no live tide coverage here. Check the Bureau of Meteorology.</div>');
+}
+
+/* ============== SPOTS VIEW ============== */
+const SPOT_TYPE_META={rock:{e:'⛰️',c:'#f472b6'},jetty:{e:'🎣',c:'#34d399'},beach:{e:'🏖️',c:'#f59e0b'},estuary:{e:'🌊',c:'#a78bfa'},sand:{e:'🏝️',c:'#fbbf24'},deep:{e:'🕳️',c:'#22d3ee'},reef:{e:'🪸',c:'#fb7185'},thermal:{e:'🔥',c:'#fb923c'}};
+function haversine(la1,lo1,la2,lo2){const R=6371,toR=Math.PI/180;const dLa=(la2-la1)*toR,dLo=(lo2-lo1)*toR;const a=Math.sin(dLa/2)**2+Math.cos(la1*toR)*Math.cos(la2*toR)*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(a));}
+function spotDist(s){if(!STATE.loc)return null;return haversine(STATE.loc.lat,STATE.loc.lon,s.lat,s.lon);}
+function spotBadges(s){let b='';if(s.feat==='thermal')b+='<span class="chip border border-thermal/50 text-thermal rounded-full px-1.5 py-0.5 text-[10px]">🔥 warm water</span> ';if(s.feat==='current')b+='<span class="chip border border-brand2/50 text-brand2 rounded-full px-1.5 py-0.5 text-[10px]">🌊 pressure</span> ';return b;}
+/* NSW go-to baits & lures by species (east-coast staples — pilchards, squid, prawns, worms, nippers). */
+const NSW_BAITS={
+  Bream:['Peeled prawn','Live nippers','Mullet strip','Bread'],
+  Flathead:['Pilchard','Whitebait','Soft plastics','Live poddy mullet'],
+  Whiting:['Live beach worms','Blood worms','Pipis','Nippers'],
+  Jewfish:['Live mullet','Squid','Fresh fish fillet','Soft vibes'],
+  Mulloway:['Live tailor','Whole squid','Squid head','Live mullet'],
+  Tailor:['Pilchard (ganged)','Garfish','Metal slugs'],
+  Salmon:['Metal slugs','Pilchard','Surface poppers'],
+  Snapper:['Whole squid','Pilchard','Soft plastics','Slimy mackerel'],
+  Trevally:['Peeled prawn','Cut pilchard','Soft plastics'],
+  Kingfish:['Live squid','Live yakkas','Knife jigs','Whole squid'],
+  Bonito:['Metal slugs','Small white lures','Live yakkas'],
+  Drummer:['Cunjevoi','Bread','Cabbage weed','Peeled prawn'],
+  Luderick:['Green/cabbage weed'],
+  Squid:['Squid jigs (prawn pattern)'],
+  Tarwhine:['Peeled prawn','Nippers','Bread'],
+  Bluefish:['Pilchard (ganged)','Metal slugs'],
+  Bass:['Surface lures','Spinnerbaits','Live worms','Small soft plastics']
+};
+function baitKeyFor(name){ // map a spot species label to a NSW_BAITS key
+  if(NSW_BAITS[name])return name;
+  const k=Object.keys(NSW_BAITS).find(key=>name.includes(key)||key.includes(name));
+  return k||null;
+}
+function spotBaits(s){
+  const out=[];
+  (s.sp||[]).forEach(sp=>{const k=baitKeyFor(sp);if(k)NSW_BAITS[k].forEach(b=>{if(!out.includes(b))out.push(b);});});
+  return out.slice(0,5);
+}
+function renderRegionFilter(){$('#regionFilter').innerHTML=REGIONS.map(r=>'<button data-region="'+esc(r)+'" class="chip rounded-full px-3 py-1.5 text-[12px] whitespace-nowrap '+(STATE.region===r?'border-brand/60 text-brand':'text-muted')+'">'+esc(r)+'</button>').join('');
+  $$('#regionFilter [data-region]').forEach(b=>b.addEventListener('click',()=>{STATE.region=b.dataset.region;renderRegionFilter();renderSpotsList();}));}
+function renderSpotsList(){
+  const ct=$('#spotCountTxt');if(ct)ct.textContent=SPOTS.length;
+  const q=(STATE.spotQuery||'').trim().toLowerCase();
+  let list=SPOTS.map(s=>({...s,dist:spotDist(s)}));
+  if(STATE.region!=='All')list=list.filter(s=>s.r===STATE.region);
+  if(q)list=list.filter(s=>s.n.toLowerCase().includes(q)||s.r.toLowerCase().includes(q)||(s.sp||[]).some(x=>x.toLowerCase().includes(q))||spotBaits(s).join(' ').toLowerCase().includes(q));
+  if(STATE.loc)list.sort((a,b)=>(a.dist??9e9)-(b.dist??9e9));
+  const rc=$('#spotResultCount');if(rc)rc.textContent='Showing '+list.length+' of '+SPOTS.length+(STATE.region!=='All'?(' · '+STATE.region):'')+(q?(' · “'+STATE.spotQuery.trim()+'”'):'');
+  if(!list.length){$('#spotsList').innerHTML='<div class="glass border border-line rounded-2xl p-6 text-center text-muted fade-in"><div class="text-2xl mb-1">🎣</div><div class="text-[13px]">No spots match'+(q?(' “'+esc(STATE.spotQuery.trim())+'”'):'')+'.</div><div class="text-[12px] mt-1">Try another species or region, or clear the search.</div></div>';return;}
+  $('#spotsList').innerHTML=list.map(s=>{const meta=SPOT_TYPE_META[s.t]||{e:'📍',c:'#7c8aa5'};
+    return '<div class="glass border border-line rounded-2xl p-3.5 fade-in"><div class="flex items-start gap-3"><div class="text-2xl shrink-0">'+meta.e+'</div><div class="flex-1 min-w-0"><div class="flex items-center justify-between gap-2"><span class="font-bold text-[14px]">'+esc(s.n)+'</span>'+(s.dist!=null?'<span class="text-[11px] text-muted shrink-0">'+round(s.dist,1)+' km</span>':'')+'</div><div class="text-[11px] text-muted">'+esc(s.r)+'</div><div class="mt-1.5 flex flex-wrap gap-1">'+spotBadges(s)+s.sp.slice(0,5).map(x=>'<span class="chip rounded-full px-1.5 py-0.5 text-[10px]">'+esc(x)+'</span>').join('')+'</div><div class="text-[12px] text-muted mt-2 leading-relaxed">'+esc(s.why)+'</div><div class="mt-2 flex items-start gap-1.5"><span class="text-[11px] shrink-0 mt-0.5">🪱</span><div class="text-[11px] text-muted"><span class="text-white font-medium">Top baits:</span> '+esc(spotBaits(s).join(', '))+'</div></div><button class="mt-2.5 chip rounded-lg px-3 py-1.5 text-[12px] font-medium text-brand active:scale-95 transition" data-loadspot="'+s.lat+','+s.lon+'" data-name="'+esc(s.n)+'">Load conditions here →</button></div></div></div>';}).join('');
+  $$('#spotsList [data-loadspot]').forEach(b=>b.addEventListener('click',()=>{const[la,lo]=b.dataset.loadspot.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:''});switchTab('dashboard');toast('Loaded '+b.dataset.name);}));
+}
+function renderNearSpots(){
+  if(!STATE.loc){$('#nearSpots').innerHTML='<div class="text-[12px] text-muted">Set a location to see nearby curated spots.</div>';return;}
+  const list=SPOTS.map(s=>({...s,dist:spotDist(s)})).sort((a,b)=>a.dist-b.dist).slice(0,3);
+  $('#nearSpots').innerHTML=list.map(s=>{const meta=SPOT_TYPE_META[s.t]||{e:'📍'};return '<button class="w-full text-left flex items-center gap-3 chip rounded-xl p-2.5 active:scale-[.99] transition" data-loadspot="'+s.lat+','+s.lon+'" data-name="'+esc(s.n)+'"><div class="text-xl shrink-0">'+meta.e+'</div><div class="flex-1 min-w-0"><div class="flex items-center justify-between gap-2"><span class="font-semibold text-[13px] truncate">'+esc(s.n)+'</span><span class="text-[11px] text-muted shrink-0">'+round(s.dist,1)+' km</span></div><div class="text-[11px] text-muted truncate">'+spotBadges(s).replace(/<[^>]+>/g,'').trim()+s.sp.slice(0,3).join(', ')+'</div></div></button>';}).join('');
+  $$('#nearSpots [data-loadspot]').forEach(b=>b.addEventListener('click',()=>{const[la,lo]=b.dataset.loadspot.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:''});toast('Loaded '+b.dataset.name);}));
+}
+
+/* ============== CATCH LOG ============== */
+function getLog(){return LS.get('fishos_log',[]);}
+function setLog(l){LS.set('fishos_log',l);}
+function renderLog(){
+  const log=getLog();
+  // stats
+  const total=log.length;const species=new Set(log.map(c=>c.species)).size;
+  let pb=null;log.forEach(c=>{if(c.length&&(!pb||c.length>pb.length))pb=c;});
+  $('#logStats').innerHTML=[['Catches',total],['Species',species],['PB',pb?(pb.length+'cm '+pb.species):'—']].map(([k,v])=>'<div class="glass border border-line rounded-2xl p-3 text-center fade-in"><div class="text-[11px] uppercase tracking-wider text-muted">'+k+'</div><div class="mt-0.5 font-bold text-[15px] truncate">'+esc(String(v))+'</div></div>').join('');
+  if(!log.length){$('#logList').innerHTML='<div class="text-center py-6 text-muted"><div class="text-3xl mb-2">🎣</div><div class="text-[13px]">No catches logged yet.</div><div class="text-[12px] mt-1">Tap <span class="text-brand">+ Add</span> or "Log a catch" on the dashboard to start your logbook.</div></div>';return;}
+  $('#logList').innerHTML=log.slice().reverse().map(c=>{const sp=SPECIES.find(s=>s.name===c.species);const isPB=pb&&c.id===pb.id;
+    return '<div class="chip rounded-xl p-3 fade-in"><div class="flex items-center gap-3"><div class="text-2xl">'+(sp?sp.emoji:'🐟')+'</div><div class="flex-1 min-w-0"><div class="flex items-center gap-2"><span class="font-semibold text-[14px]">'+esc(c.species)+'</span>'+(c.length?'<span class="text-[12px] text-brand font-bold">'+c.length+'cm</span>':'')+(isPB?'<span class="text-[10px] chip border border-brand/50 text-brand rounded-full px-1.5">PB</span>':'')+'</div><div class="text-[11px] text-muted truncate">'+esc(c.spot||'—')+' · '+new Date(c.ts).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+(c.bait?' · '+esc(c.bait):'')+'</div>'+(c.score!=null?'<div class="text-[11px] text-muted">conditions: score '+c.score+' · wind '+windDisp(c.wind)+' '+windUnitLabel()+' · '+esc(c.weather||'')+' · '+esc(c.moon||'')+'</div>':'')+(c.notes?'<div class="text-[12px] mt-1">'+esc(c.notes)+'</div>':'')+'</div><div class="flex flex-col gap-1.5 shrink-0"><button data-share-catch="'+c.id+'" class="text-muted text-[11px]">Share</button><button data-del-catch="'+c.id+'" class="text-danger text-[11px]">Delete</button></div></div></div>';}).join('');
+  $$('[data-del-catch]').forEach(b=>b.addEventListener('click',()=>{setLog(getLog().filter(c=>c.id!==b.dataset.delCatch));renderLog();toast('Catch deleted');}));
+  $$('[data-share-catch]').forEach(b=>b.addEventListener('click',()=>{const c=getLog().find(x=>x.id===b.dataset.shareCatch);shareCatch(c);}));
+}
+function openCatchSheet(){
+  const d=STATE.data;const opts=SPECIES.map(s=>'<option value="'+s.name+'">'+s.name+'</option>').join('');
+  const snap=d?('Conditions auto-saved: score '+d.score+', wind '+windDisp(d.cur.wind_speed_10m)+' '+windUnitLabel()+', '+wmo(d.cur.weather_code)[0]+', '+d.moon.phase):'No live conditions yet — they\'ll be blank.';
+  openSheet('<h2 class="font-bold text-lg mb-1">Log a catch</h2><p class="text-[12px] text-muted mb-3">'+snap+'</p>'
+    +'<label class="text-[12px] text-muted">Species</label><select id="cSpecies" class="w-full chip rounded-xl px-3 h-11 mt-1 mb-3 text-sm bg-panel2">'+opts+'</select>'
+    +'<div class="grid grid-cols-2 gap-3 mb-3"><div><label class="text-[12px] text-muted">Length (cm)</label><input id="cLen" type="number" inputmode="numeric" class="w-full chip rounded-xl px-3 h-11 mt-1 text-sm" placeholder="e.g. 38"></div><div><label class="text-[12px] text-muted">Bait/lure</label><input id="cBait" type="text" class="w-full chip rounded-xl px-3 h-11 mt-1 text-sm" placeholder="e.g. live prawn"></div></div>'
+    +'<label class="text-[12px] text-muted">Spot</label><input id="cSpot" type="text" class="w-full chip rounded-xl px-3 h-11 mt-1 mb-3 text-sm" value="'+(STATE.loc?esc(STATE.loc.name):'')+'">'
+    +'<label class="text-[12px] text-muted">Notes</label><textarea id="cNotes" rows="2" class="w-full chip rounded-xl px-3 py-2 mt-1 mb-4 text-sm" placeholder="tide, technique, who with…"></textarea>'
+    +'<button id="cSave" class="w-full bg-brand text-ink font-bold rounded-xl py-3 active:scale-95 transition">Save to logbook</button>');
+  $('#cSave').addEventListener('click',()=>{
+    const c={id:'c'+Date.now(),ts:Date.now(),species:$('#cSpecies').value,length:parseFloat($('#cLen').value)||null,bait:$('#cBait').value.trim(),spot:$('#cSpot').value.trim(),notes:$('#cNotes').value.trim(),lat:STATE.loc?STATE.loc.lat:null,lon:STATE.loc?STATE.loc.lon:null};
+    if(d){c.score=d.score;c.wind=d.cur.wind_speed_10m;c.weather=wmo(d.cur.weather_code)[0];c.moon=d.moon.phase;}
+    const log=getLog();log.push(c);setLog(log);sheetGoto('log');toast('🎣 Catch logged!');
+  });
+}
+function exportLog(){
+  const log=getLog();if(!log.length){toast('Nothing to export yet');return;}
+  const blob=new Blob([JSON.stringify(log,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='fishos-catch-log.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Logbook exported');
+}
+async function shareCatch(c){if(!c)return;const sp=SPECIES.find(s=>s.name===c.species);const txt=(sp?sp.emoji:'🐟')+' '+c.species+(c.length?' '+c.length+'cm':'')+(c.spot?' @ '+c.spot:'')+(c.bait?' on '+c.bait:'')+' — logged with FishOS AU Lite 🎣';await doShare('My catch — '+c.species,txt);}
+
+/* ============== SHARE ============== */
+async function doShare(title,text){
+  try{if(navigator.share){await navigator.share({title,text});return;}}catch(_){}
+  try{await navigator.clipboard.writeText(text);toast('Copied to clipboard');}catch(_){toast(text,3500);}
+}
+function shareConditions(){const d=STATE.data;if(!d){toast('No conditions yet');return;}
+  const txt='🎣 '+(STATE.loc?STATE.loc.name:'My spot')+' — Fishing score '+d.score+'/100 ('+scoreWord(d.score)+'). Wind '+windDisp(d.cur.wind_speed_10m)+' '+windUnitLabel()+' '+compass(d.cur.wind_direction_10m)+', '+wmo(d.cur.weather_code)[0]+', '+d.moon.emoji+' '+d.moon.phase+'. Top: '+d.top3.map(s=>s.name+' '+s.prob+'%').join(', ')+'. via FishOS AU Lite';
+  doShare('FishOS — '+(STATE.loc?STATE.loc.name:'conditions'),txt);
+}
+
+/* ============== SAVED LOCATIONS ============== */
+function getSaved(){return LS.get('fishos_saved',[]);}
+function setSaved(s){LS.set('fishos_saved',s);}
+function isSaved(loc){return getSaved().some(s=>Math.abs(s.lat-loc.lat)<0.02&&Math.abs(s.lon-loc.lon)<0.02);}
+function toggleSaved(){if(!STATE.loc)return;let s=getSaved();if(isSaved(STATE.loc)){s=s.filter(x=>!(Math.abs(x.lat-STATE.loc.lat)<0.02&&Math.abs(x.lon-STATE.loc.lon)<0.02));toast('Removed from saved');}else{s.unshift({name:STATE.loc.name,lat:STATE.loc.lat,lon:STATE.loc.lon});s=s.slice(0,12);toast('⭐ Saved '+STATE.loc.name);}setSaved(s);renderFav();}
+function renderFav(){
+  const icon=$('#favIcon');if(STATE.loc&&isSaved(STATE.loc)){icon.setAttribute('fill','#34d399');icon.classList.add('text-brand');icon.classList.remove('text-muted');}else{icon.setAttribute('fill','none');icon.classList.remove('text-brand');icon.classList.add('text-muted');}
+  const saved=getSaved();
+  $('#favChips').innerHTML=saved.length?saved.map(s=>'<button class="chip rounded-full pl-3 pr-2 py-1 text-[12px] whitespace-nowrap flex items-center gap-1" data-fav="'+s.lat+','+s.lon+'" data-name="'+esc(s.name)+'">⭐ '+esc(s.name)+' <span class="text-muted" data-rmfav="'+s.lat+','+s.lon+'">×</span></button>').join(''):'';
+  $$('#favChips [data-fav]').forEach(b=>b.addEventListener('click',e=>{if(e.target.dataset.rmfav){let s=getSaved();const[la,lo]=e.target.dataset.rmfav.split(',').map(Number);setSaved(s.filter(x=>!(x.lat===la&&x.lon===lo)));renderFav();return;}const[la,lo]=b.dataset.fav.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:''});switchTab('dashboard');}));
+}
+
+/* ============== LOAD ============== */
+function condKey(loc){return 'fishos_cond_'+round(loc.lat,2)+'_'+round(loc.lon,2);}
+function fetchNow(){
+  if(!STATE.loc){toast('Set a location first');return;}
+  const ic=$('#fetchIcon'),ut=$('#updatedTxt');
+  if(ic){ic.style.transition='transform .8s linear';ic.style.transform='rotate(360deg)';setTimeout(()=>{ic.style.transition='';ic.style.transform='';},820);}
+  if(ut)ut.textContent='Fetching latest…';
+  // force a fresh fetch (bypass the "show cached first" so the user sees it working)
+  const loc=STATE.loc,seq=++_loadSeq;
+  fetchConditions(loc.lat,loc.lon).then(d=>{if(seq!==_loadSeq)return;render(d,false);LS.set(condKey(loc),d);if(d.src&&d.src!=='Open-Meteo')toast('Loaded · '+d.src);else toast('Updated');if(STATE.map)updateMapForLocation(loc);})
+    .catch(()=>{if(seq!==_loadSeq)return;const c=LS.get(condKey(loc),null);if(ut)ut.textContent=c?('Saved '+ago(c.fetchedAt)+' · refresh failed'):'Refresh failed';toast('Couldn’t reach any weather source — try again or switch vendor in ⚙️');});
+}
+let _loadSeq=0;
+async function loadLocation(loc){
+  const seq=++_loadSeq; // guard against out-of-order responses when switching spots fast
+  STATE.loc=loc;$('#locName').textContent=loc.name;$('#speciesLoc').textContent=loc.name;renderFav();renderNearSpots();
+  const cached=LS.get(condKey(loc),null);
+  if(cached){render(cached,true);}else setLoadingHero();
+  try{
+    const d=await fetchConditions(loc.lat,loc.lon);
+    if(seq!==_loadSeq)return; // a newer load started — ignore this stale result
+    render(d,false);LS.set(condKey(loc),d);saveLast(loc);
+    if(d.src&&d.src!=='Open-Meteo')$('#scoreSub').textContent+=' · via '+d.src;
+    if(STATE.map)updateMapForLocation(loc);
+  }catch(e){
+    if(seq!==_loadSeq)return;
+    if(cached){const sb=$('#staleBar');sb.classList.remove('hidden');sb.innerHTML='<span class="w-1.5 h-1.5 rounded-full bg-danger"></span>Couldn’t refresh — showing saved data from '+ago(cached.fetchedAt)+'. <button id="retryBtn" class="text-brand2 underline ml-1">Retry</button>';const rb=$('#retryBtn');if(rb)rb.addEventListener('click',()=>loadLocation(loc));}
+    else{$('#scoreLabel').textContent='Couldn’t load conditions';$('#scoreSub').textContent='Tap retry — check your connection';$('#scoreFactors').innerHTML='<button id="retryBtn2" class="chip rounded-full px-3 py-1 text-[12px] text-brand2">Retry</button>';const rb=$('#retryBtn2');if(rb)rb.addEventListener('click',()=>loadLocation(loc));}
+  }
+}
+function setLoadingHero(){$('#scoreNum').textContent='–';$('#scoreLabel').textContent='Loading conditions…';$('#scoreSub').textContent='Pulling live marine data';$('#scoreFactors').innerHTML='<span class="chip rounded-full px-2 py-0.5 text-[11px] text-muted pulse">analysing…</span>';}
+
+/* ============== GEOCODE/SEARCH ============== */
+let searchTimer=null;
+async function geocode(q){const url='https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=6&language=en&countryCode=AU';const r=await fetch(url);if(!r.ok)return[];const j=await r.json();return(j.results||[]).map(x=>({name:x.name+(x.admin1?(', '+x.admin1):''),lat:x.latitude,lon:x.longitude,admin:x.admin1||'',country:x.country}));}
+function bindSearch(){
+  const inp=$('#search'),sug=$('#suggest'),clr=$('#searchClear');
+  inp.addEventListener('input',()=>{const q=inp.value.trim();clr.classList.toggle('hidden',!q);clearTimeout(searchTimer);if(q.length<2){sug.classList.add('hidden');return;}
+    searchTimer=setTimeout(async()=>{const res=await geocode(q);if(!res.length){sug.innerHTML='<div class="px-3 py-2.5 text-[13px] text-muted">No matches in Australia</div>';sug.classList.remove('hidden');return;}
+      sug.innerHTML=res.map((r,i)=>'<button data-i="'+i+'" class="w-full text-left px-3 py-2.5 hover:bg-panel2 transition flex items-center gap-2 border-b border-line last:border-0"><svg class="w-4 h-4 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.5-7-11a7 7 0 0114 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="text-[13px]">'+esc(r.name)+'</span></button>').join('');sug.classList.remove('hidden');
+      $$('#suggest button').forEach(b=>b.addEventListener('click',()=>{const r=res[+b.dataset.i];inp.value=r.name;sug.classList.add('hidden');clr.classList.add('hidden');loadLocation(r);switchTab('dashboard');}));},280);});
+  clr.addEventListener('click',()=>{inp.value='';clr.classList.add('hidden');sug.classList.add('hidden');});
+  document.addEventListener('click',e=>{if(!e.target.closest('#suggest')&&!e.target.closest('#search'))sug.classList.add('hidden');});
+}
+function useGPS(){
+  if(!navigator.geolocation){toast('GPS not supported on this device');return;}
+  toast('Getting your location…');$('#gpsBtn').classList.add('pulse');
+  navigator.geolocation.getCurrentPosition(async pos=>{$('#gpsBtn').classList.remove('pulse');const lat=pos.coords.latitude,lon=pos.coords.longitude;let name='My Location';
+    try{const r=await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+lat+'&lon='+lon+'&zoom=12');if(r.ok){const j=await r.json();const a=j.address||{};name=(a.suburb||a.town||a.city||a.village||a.hamlet||a.county||'My Location')+(a.state?(', '+a.state):'');}}catch(_){}
+    loadLocation({name,lat,lon,admin:''});switchTab('dashboard');},
+    err=>{$('#gpsBtn').classList.remove('pulse');toast(err.code===1?'Location permission denied':'Could not get GPS fix');},{enableHighAccuracy:true,timeout:9000,maximumAge:60000});
+}
+
+/* ============== MAP ============== */
+const SPOT_TYPES={ramp:{label:'Boat ramp',color:'#22d3ee'},jetty:{label:'Jetty/pier',color:'#34d399'},beach:{label:'Beach',color:'#f59e0b'},estuary:{label:'Estuary',color:'#a78bfa'},rock:{label:'Rock/headland',color:'#f472b6'}};
+function initMap(){
+  if(STATE.map)return;const c=STATE.loc?[STATE.loc.lat,STATE.loc.lon]:[-33.86,151.21];
+  STATE.map=L.map('map',{zoomControl:true,attributionControl:true}).setView(c,11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(STATE.map);
+  STATE.curatedLayer=L.layerGroup().addTo(STATE.map);STATE.spotLayer=L.layerGroup().addTo(STATE.map);
+  // plot curated spots once
+  SPOTS.forEach(s=>{const meta=SPOT_TYPE_META[s.t]||{c:'#7c8aa5',e:'📍'};
+    L.marker([s.lat,s.lon],{icon:L.divIcon({html:'<div style="background:'+meta.c+';width:22px;height:22px;border-radius:50%;border:2px solid #0b1220;box-shadow:0 0 0 2px '+meta.c+'88;display:grid;place-items:center;font-size:11px">'+(s.feat==='thermal'?'🔥':s.feat==='current'?'🌊':'')+'</div>',className:'',iconSize:[22,22],iconAnchor:[11,11]})})
+     .addTo(STATE.curatedLayer)
+     .bindPopup('<b>'+esc(s.n)+'</b><br>'+esc(s.r)+'<br><span style="color:#7c8aa5">'+esc(s.sp.join(', '))+'</span><br>'+esc(s.why)+'<br><a href="#" data-popup-load="'+s.lat+','+s.lon+'|'+esc(s.n)+'" style="color:#34d399">Load conditions →</a>');});
+  $('#mapLegend').innerHTML=Object.values(SPOT_TYPES).map(t=>'<span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full" style="background:'+t.color+'"></span>'+t.label+'</span>').join('')+'<span class="flex items-center gap-1"><span>🔥</span>warm</span><span class="flex items-center gap-1"><span>🌊</span>current</span>';
+  STATE.map.on('popupopen',e=>{const a=e.popup._contentNode.querySelector('[data-popup-load]');if(a)a.addEventListener('click',ev=>{ev.preventDefault();const[ll,nm]=a.dataset.popupLoad.split('|');const[la,lo]=ll.split(',').map(Number);loadLocation({name:nm,lat:la,lon:lo,admin:''});switchTab('dashboard');});});
+  setTimeout(()=>STATE.map.invalidateSize(),200);
+  if(STATE.loc)updateMapForLocation(STATE.loc);
+}
+function updateMapForLocation(loc){
+  if(!STATE.map)return;STATE.map.setView([loc.lat,loc.lon],12);
+  if(STATE.userMarker)STATE.map.removeLayer(STATE.userMarker);
+  STATE.userMarker=L.marker([loc.lat,loc.lon]).addTo(STATE.map).bindPopup('<b>'+esc(loc.name)+'</b><br>Your selected spot');
+  loadSpots(loc.lat,loc.lon);
+}
+function spotIcon(type){const t=SPOT_TYPES[type];return L.divIcon({html:'<div style="background:'+t.color+';width:16px;height:16px;border-radius:50%;border:2px solid #0b1220;box-shadow:0 0 0 1px '+t.color+'"></div>',className:'',iconSize:[16,16],iconAnchor:[8,8]});}
+async function loadSpots(lat,lon){
+  const key=round(lat,2)+','+round(lon,2);if(STATE.lastSpotsKey===key)return;STATE.lastSpotsKey=key;
+  $('#spotCount').textContent='scanning…';STATE.spotLayer.clearLayers();
+  $('#spotListMap').innerHTML='<div class="text-[12px] text-muted pulse py-2">Searching OpenStreetMap for ramps, jetties, beaches…</div>';
+  const r=0.09,bbox=(lat-r)+','+(lon-r)+','+(lat+r)+','+(lon+r);
+  const ql='[out:json][timeout:25];(node["leisure"="slipway"]('+bbox+');way["leisure"="slipway"]('+bbox+');node["man_made"="pier"]('+bbox+');way["man_made"="pier"]('+bbox+');way["natural"="beach"]('+bbox+');node["natural"="beach"]('+bbox+');node["natural"="cape"]('+bbox+');way["waterway"="riverbank"]('+bbox+'););out center 60;';
+  const endpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];let data=null;
+  for(const ep of endpoints){try{const res=await fetch(ep,{method:'POST',body:'data='+encodeURIComponent(ql)});if(res.ok){data=await res.json();break;}}catch(_){}}
+  if(!data){$('#spotCount').textContent='live offline (curated shown)';$('#spotListMap').innerHTML='<div class="text-[12px] text-muted py-2">Live OSM search unavailable — the curated Sydney→Newcastle spots are still on the map. Pan to explore.</div>';return;}
+  const spots=[];(data.elements||[]).forEach(el=>{const p=el.tags||{};let type=null;if(p.leisure==='slipway')type='ramp';else if(p.man_made==='pier')type='jetty';else if(p.natural==='beach')type='beach';else if(p.natural==='cape')type='rock';else if(p.waterway==='riverbank')type='estuary';if(!type)return;const la=el.lat||(el.center&&el.center.lat),lo=el.lon||(el.center&&el.center.lon);if(la==null||lo==null)return;spots.push({type,name:p.name||SPOT_TYPES[type].label,lat:la,lon:lo,dist:haversine(lat,lon,la,lo)});});
+  spots.sort((a,b)=>a.dist-b.dist);const seen={},kept=[];for(const s of spots){seen[s.type]=seen[s.type]||0;const cap=s.type==='rock'?6:(s.type==='beach'?8:20);if(seen[s.type]<cap){kept.push(s);seen[s.type]++;}if(kept.length>=50)break;}
+  kept.forEach(s=>{L.marker([s.lat,s.lon],{icon:spotIcon(s.type)}).addTo(STATE.spotLayer).bindPopup('<b>'+esc(s.name)+'</b><br>'+SPOT_TYPES[s.type].label+' · '+round(s.dist,1)+' km');});
+  $('#spotCount').textContent=kept.length+' live + '+SPOTS.length+' curated';
+  $('#spotListMap').innerHTML=kept.length?kept.slice(0,30).map(s=>'<button class="w-full text-left flex items-center gap-2.5 chip rounded-lg px-2.5 py-2 hover:bg-panel2 transition" data-lat="'+s.lat+'" data-lon="'+s.lon+'"><span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:'+SPOT_TYPES[s.type].color+'"></span><span class="text-[13px] flex-1 truncate">'+esc(s.name)+'</span><span class="text-[11px] text-muted shrink-0">'+round(s.dist,1)+' km</span></button>').join(''):'<div class="text-[12px] text-muted py-2">No tagged live spots within ~10 km — curated spots still on map.</div>';
+  $$('#spotListMap button').forEach(b=>b.addEventListener('click',()=>{STATE.map.setView([+b.dataset.lat,+b.dataset.lon],15);}));
+}
+
+/* ============== SHEETS ============== */
+function sheetIsOpen(){return !$('#sheetWrap').classList.contains('hidden');}
+function openSheet(html){
+  const wasHidden=!sheetIsOpen();
+  $('#sheet').innerHTML='<div class="w-10 h-1 rounded-full bg-line mx-auto mb-3"></div>'+html;
+  $('#sheet').scrollTop=0;
+  $('#sheetWrap').classList.remove('hidden');
+  if(wasHidden){STATE.sheetOpen=true;try{history.pushState({view:STATE.view,sheet:true},'');}catch(_){}}
+  updateBackBtn();
+}
+function closeSheet(){ // user-initiated: unwind the history entry
+  if(!sheetIsOpen())return;
+  if(history.state&&history.state.sheet){history.back();}
+  else{$('#sheetWrap').classList.add('hidden');STATE.sheetOpen=false;updateBackBtn();}
+}
+function sheetGoto(view){ // close a sheet AND navigate, without a dangling entry
+  $('#sheetWrap').classList.add('hidden');STATE.sheetOpen=false;
+  try{history.replaceState({view:view,sheet:false},'');}catch(_){}
+  applyView(view);
+}
+function openSettings(){
+  const tp=STATE.themePref;const tBtn=(v,l)=>'<button data-theme="'+v+'" class="px-3 py-1.5 text-[12px] '+(tp===v?'bg-brand text-ink font-bold':'text-muted')+'">'+l+'</button>';
+  const vp=STATE.vendor;const vBtn=(v,l)=>'<button data-vendor="'+v+'" class="px-2.5 py-1.5 text-[12px] '+(vp===v?'bg-brand text-ink font-bold':'text-muted')+'">'+l+'</button>';
+  openSheet('<h2 class="font-bold text-lg mb-3">Settings</h2>'
+    +'<div class="chip rounded-xl p-3 mb-3"><div class="flex items-center justify-between gap-2"><div><div class="font-medium text-sm">Appearance</div><div class="text-[12px] text-muted">Dark, light or follow your phone</div></div><div class="flex rounded-lg overflow-hidden border border-line shrink-0">'+tBtn('dark','Dark')+tBtn('light','Light')+tBtn('auto','Auto')+'</div></div></div>'
+    +'<div class="chip rounded-xl p-3 mb-3"><div class="flex items-center justify-between"><div><div class="font-medium text-sm">Wind units</div><div class="text-[12px] text-muted">Boaties usually use knots</div></div><div class="flex rounded-lg overflow-hidden border border-line"><button id="uKmh" class="px-3 py-1.5 text-[12px] '+(STATE.units.wind==='kmh'?'bg-brand text-ink font-bold':'text-muted')+'">km/h</button><button id="uKn" class="px-3 py-1.5 text-[12px] '+(STATE.units.wind==='kn'?'bg-brand text-ink font-bold':'text-muted')+'">knots</button></div></div></div>'
+    +'<div class="chip rounded-xl p-3 mb-3"><div class="flex items-center justify-between gap-2"><div><div class="font-medium text-sm">Weather source</div><div class="text-[12px] text-muted">Switch vendor if one is down</div></div><div class="flex rounded-lg overflow-hidden border border-line shrink-0">'+vBtn('auto','Auto')+vBtn('openmeteo','Open-Meteo')+vBtn('metno','MET')+'</div></div></div>'
+    +'<div class="chip rounded-xl p-3 mb-3"><div class="flex items-center justify-between gap-2 mb-1"><div><div class="font-medium text-sm">Connection test</div><div class="text-[12px] text-muted">Check which data source is reachable</div></div><button id="testSrc" class="chip rounded-lg px-3 py-1.5 text-[12px] text-brand2 font-medium shrink-0">🔌 Test</button></div><div id="testOut" class="text-[12px] mt-1"></div></div>'
+    +'<div class="chip rounded-xl p-3 mb-3 text-[12px] text-muted"><b class="text-white">About the tide.</b> Where there\'s coastal coverage FishOS now shows <b class="text-white">live tide predictions</b> (Open-Meteo Marine, FES2014) — real High/Low times and a true tide curve. Inland or no-coverage spots fall back to a lunar model. Either way, check the Bureau of Meteorology before a low-tide rock or breakwall session.</div>'
+    +'<div class="chip rounded-xl p-3 mb-4 text-[12px] text-muted"><b class="text-white">Data &amp; privacy.</b> Your catch log and saved spots stay on this device only (local storage). Nothing is uploaded. Weather/wind from Open-Meteo with a MET Norway backup; tides from Open-Meteo Marine with a lunar-model fallback; maps &amp; spots from OpenStreetMap.</div>'
+    +'<button id="installBtn" class="w-full chip rounded-xl py-3 font-medium mb-2 '+(deferredPrompt?'':'opacity-50')+'">📲 Install FishOS to home screen</button>'
+    +'<button id="clearLog" class="w-full text-danger text-[13px] py-2">Clear catch log</button>');
+  $$('#sheet [data-theme]').forEach(b=>b.addEventListener('click',()=>{setTheme(b.dataset.theme);openSettings();}));
+  $$('#sheet [data-vendor]').forEach(b=>b.addEventListener('click',()=>{STATE.vendor=b.dataset.vendor;savePrefs();openSettings();toast('Source: '+(STATE.vendor==='auto'?'Auto':STATE.vendor==='metno'?'MET Norway':'Open-Meteo'));if(STATE.loc)fetchNow();}));
+  const tb=$('#testSrc');if(tb)tb.addEventListener('click',async()=>{const out=$('#testOut');const loc=STATE.loc||{lat:-33.87,lon:151.21};out.innerHTML='<span class="text-muted pulse">Testing 6 sources…</span>';const res=await testSources(loc.lat,loc.lon);out.innerHTML=res.map(r=>'<div class="flex items-center gap-2 py-0.5"><span class="'+(r.ok?'text-brand':'text-danger')+'">'+(r.ok?'✓':'✕')+'</span><span class="flex-1 min-w-0 truncate">'+esc(r.name)+'</span><span class="text-muted shrink-0">'+(r.ok?(r.ms+'ms'):(''+r.code))+'</span></div>').join('')+'<div class="text-[11px] text-muted mt-1">✕ = blocked/unreachable (often a corporate firewall or no internet). Tides &amp; moon still work offline via the local model.</div>';});
+  $('#uKmh').addEventListener('click',()=>{STATE.units.wind='kmh';savePrefs();if(STATE.data)render(STATE.data,false);openSettings();});
+  $('#uKn').addEventListener('click',()=>{STATE.units.wind='kn';savePrefs();if(STATE.data)render(STATE.data,false);openSettings();});
+  $('#installBtn').addEventListener('click',doInstall);
+  $('#clearLog').addEventListener('click',()=>{if(confirm('Delete all logged catches? This cannot be undone.')){setLog([]);renderLog();closeSheet();toast('Catch log cleared');}});
+}
+function openTideInfo(){
+  const real=STATE.data&&STATE.data.tide&&STATE.data.tide.real;
+  const src=real
+    ? '<p class="text-[13px] text-muted leading-relaxed">This spot is using <b class="text-white">live tide data</b> — astronomical sea-level heights from the Open-Meteo Marine API (FES2014 tidal model), free and key-free. The <b class="text-white">High</b> and <b class="text-white">Low</b> times shown are real predicted tide turning points, and the 24-hour chart plots the actual tide curve.</p>'
+    : '<p class="text-[13px] text-muted leading-relaxed">No live tide coverage at this exact point (common inland or in sheltered lakes), so FishOS is <b class="text-white">modelling</b> a semi-diurnal (~12h25m) tide from the lunar transit. Great for <b class="text-white">timing the bite</b>, but approximate.</p>';
+  openSheet('<h2 class="font-bold text-lg mb-2">About the tide reading</h2>'+src
+    +'<p class="text-[13px] text-amber-100 mt-3">⚠️ Even live predictions don\'t include wind setup or storm surge. Before fishing a low rock ledge, breakwall, or wading a flat, check the Bureau of Meteorology tide predictions. Conditions and your safety come first.</p>'
+    +'<button onclick="closeSheet()" class="w-full bg-brand text-ink font-bold rounded-xl py-3 mt-4">Got it</button>');}
+
+/* ============== PWA ============== */
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;});
+function doInstall(){if(deferredPrompt){deferredPrompt.prompt();deferredPrompt.userChoice.finally(()=>{deferredPrompt=null;closeSheet();});}else toast('Use your browser menu → "Add to Home Screen"');}
+function setupPWA(){
+  const manifest={name:'FishOS AU Lite',short_name:'FishOS AU',description:'Free Australian fishing predictor — weather, moon, solunar, spots & catch log.',start_url:'.',scope:'.',display:'standalone',background_color:'#070b14',theme_color:'#0b1220',orientation:'portrait',icons:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='42' fill='%230b1220'/%3E%3Cpath d='M40 96c26-34 86-34 112 0-26 34-86 34-112 0z' fill='none' stroke='%2334d399' stroke-width='8'/%3E%3Ccircle cx='118' cy='88' r='7' fill='%2334d399'/%3E%3Cpath d='M150 96l22-16v32z' fill='%2334d399'/%3E%3C/svg%3E",sizes:'192x192',type:'image/svg+xml',purpose:'any maskable'},{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%230b1220'/%3E%3Cpath d='M106 256c70-90 230-90 300 0-70 90-230 90-300 0z' fill='none' stroke='%2334d399' stroke-width='20'/%3E%3Ccircle cx='314' cy='234' r='18' fill='%2334d399'/%3E%3Cpath d='M400 256l58-42v84z' fill='%2334d399'/%3E%3C/svg%3E",sizes:'512x512',type:'image/svg+xml',purpose:'any maskable'}]};
+  try{const blob=new Blob([JSON.stringify(manifest)],{type:'application/manifest+json'});const link=document.createElement('link');link.rel='manifest';link.href=URL.createObjectURL(blob);document.head.appendChild(link);}catch(_){}
+  if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
+}
+
+/* ============== TABS + BACK / HISTORY ============== */
+function applyView(name){ // DOM only — no history
+  STATE.view=name;
+  $$('.tabbtn').forEach(b=>{const on=b.dataset.tab===name;b.classList.toggle('active',on);b.setAttribute('aria-current',on?'page':'false');});
+  ['dashboard','spots','map','species','forecast','log'].forEach(v=>{const el=$('#view-'+v);if(el)el.classList.toggle('hidden',v!==name);});
+  if(name==='map'){initMap();setTimeout(()=>STATE.map&&STATE.map.invalidateSize(),150);}
+  if(name==='spots'){renderRegionFilter();renderSpotsList();}
+  if(name==='dashboard'&&STATE.data){requestAnimationFrame(()=>drawTideChart48(STATE.data));} // tide canvas has real width here
+  if(name==='forecast'&&STATE.data){requestAnimationFrame(()=>drawHourChart(STATE.data));} // 24h chart has real width here
+  if(name==='log')renderLog();
+  updateBackBtn();
+}
+function switchTab(name){
+  if(sheetIsOpen()){sheetGoto(name);window.scrollTo({top:0,behavior:'smooth'});return;}
+  if(name===STATE.view){window.scrollTo({top:0,behavior:'smooth'});return;}
+  applyView(name);window.scrollTo({top:0,behavior:'smooth'});
+  try{history.pushState({view:name,sheet:false},'');}catch(_){}
+}
+function updateBackBtn(){
+  const show=sheetIsOpen()||STATE.view!=='dashboard';
+  const bb=$('#backBtn'),lb=$('#logoBox');
+  if(bb)bb.classList.toggle('hidden',!show);
+  if(lb)lb.classList.toggle('hidden',show);
+}
+function goBack(){ if(sheetIsOpen()||STATE.view!=='dashboard'){history.back();} }
+window.addEventListener('popstate',e=>{
+  const s=e.state||{view:'dashboard',sheet:false};
+  if(sheetIsOpen()&&!s.sheet){$('#sheetWrap').classList.add('hidden');STATE.sheetOpen=false;}
+  if(s.view&&s.view!==STATE.view)applyView(s.view);
+  updateBackBtn();
+});
+function bindUI(){
+  $$('.tabbtn').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
+  $$('[data-goto]').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.goto)));
+  $('#gpsBtn').addEventListener('click',useGPS);
+  $('#favBtn').addEventListener('click',toggleSaved);
+  $('#themeBtn').addEventListener('click',toggleTheme);
+  $('#backBtn').addEventListener('click',goBack);
+  $('#setBtn').addEventListener('click',openSettings);
+  $('#locBtn').addEventListener('click',()=>$('#search').focus());
+  $('#shareBtn').addEventListener('click',shareConditions);
+  $('#logHereBtn').addEventListener('click',openCatchSheet);
+  $('#newCatch').addEventListener('click',openCatchSheet);
+  $('#exportLog').addEventListener('click',exportLog);
+  $('#tideInfo').addEventListener('click',openTideInfo);
+  $('#fetchNow').addEventListener('click',fetchNow);
+  const ss=$('#spotSearch');if(ss)ss.addEventListener('input',()=>{STATE.spotQuery=ss.value;$('#spotSearchClear').classList.toggle('hidden',!ss.value);renderSpotsList();});
+  const sc=$('#spotSearchClear');if(sc)sc.addEventListener('click',()=>{STATE.spotQuery='';ss.value='';sc.classList.add('hidden');renderSpotsList();ss.focus();});
+  $('#sheetBg').addEventListener('click',closeSheet);
+  let _rz;window.addEventListener('resize',()=>{clearTimeout(_rz);_rz=setTimeout(()=>{if(STATE.view==='dashboard'&&STATE.data)drawTideChart48(STATE.data);if(STATE.view==='forecast'&&STATE.data)drawHourChart(STATE.data);if(STATE.view==='map'&&STATE.map)STATE.map.invalidateSize();},200);});
+}
+
+/* ============== ONBOARDING ============== */
+function maybeOnboard(){
+  if(LS.get('fishos_onboarded',false))return;
+  setTimeout(()=>{openSheet('<div class="text-center"><div class="text-4xl mb-2">🎣</div><h2 class="font-bold text-lg">Welcome to FishOS AU Lite</h2><p class="text-[13px] text-muted mt-1 mb-4">Free, offline-friendly fishing intelligence for Australian anglers.</p></div><ul class="space-y-2.5 text-[13px] mb-4">'
+    +'<li class="flex gap-2"><span>📍</span><span><b>Search or GPS</b> to set your spot — get a live fishing score.</span></li>'
+    +'<li class="flex gap-2"><span>🗺️</span><span><b>Spots</b> tab has 110+ researched NSW locations (Illawarra→Newcastle) with warm-water &amp; current intel.</span></li>'
+    +'<li class="flex gap-2"><span>🐟</span><span><b>Species</b> shows live probability, bait &amp; rig for each fish.</span></li>'
+    +'<li class="flex gap-2"><span>📒</span><span><b>Log</b> your catches — they save on your device, with auto conditions &amp; PBs.</span></li>'
+    +'<li class="flex gap-2"><span>⭐</span><span>Star a spot to pin it; ⚙️ to switch to <b>knots</b>.</span></li></ul>'
+    +'<button id="obDone" class="w-full bg-brand text-ink font-bold rounded-xl py-3">Start fishing</button>');
+    $('#obDone').addEventListener('click',()=>{LS.set('fishos_onboarded',true);closeSheet();});},700);
+}
+
+/* ============== PERSIST last ============== */
+function saveLast(loc){LS.set('fishos_last',loc);}
+function getLast(){return LS.get('fishos_last',null);}
+
+/* ============== BOOT ============== */
+function boot(){
+  loadPrefs();applyTheme();bindSearch();bindUI();setupPWA();renderFav();
+  try{history.replaceState({view:'dashboard',sheet:false},'');}catch(_){}
+  updateBackBtn();
+  if(window.matchMedia){const mq=window.matchMedia('(prefers-color-scheme: light)');const h=()=>{if(STATE.themePref==='auto')applyTheme();};mq.addEventListener?mq.addEventListener('change',h):mq.addListener&&mq.addListener(h);}
+  const last=getLast();
+  if(last&&last.lat)loadLocation(last);
+  else{loadLocation({name:'Sydney, NSW',lat:-33.8688,lon:151.2093,admin:'New South Wales'});
+    if(navigator.geolocation)navigator.geolocation.getCurrentPosition(pos=>{loadLocation({name:'My Location',lat:pos.coords.latitude,lon:pos.coords.longitude,admin:''});},()=>{},{timeout:6000,maximumAge:300000});}
+  maybeOnboard();
+  setInterval(()=>{if(STATE.loc)fetchConditions(STATE.loc.lat,STATE.loc.lon).then(d=>{render(d,false);LS.set(condKey(STATE.loc),d);}).catch(()=>{});},15*60000);
+}
+document.addEventListener('DOMContentLoaded',boot);
+</script>
+</body>
+</html>
