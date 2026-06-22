@@ -1,9 +1,9 @@
 /* FishOS AU Lite — service worker (offline app shell)
    v5: HTML is network-first so deployed updates appear immediately when online,
    while still working fully offline from cache. Live API data is never cached.
-   Cache bumped v4 → v5 to ship the v2.6 searched-location tide pipeline fix —
-   the activate handler purges every older cache so no stale index.html/JS survives. */
-const CACHE = 'fishos-au-lite-v5';
+   Cache bumped to v6 to ship the v2.7 tide-table render fix (and the v2.6 searched-location
+   tide pipeline fix) — the activate handler purges every older cache so no stale index.html/JS survives. */
+const CACHE = 'fishos-au-lite-v6';
 const SHELL = [
   './',
   './index.html',
