@@ -342,7 +342,8 @@ function toast(m,ms=2200){const t=$('#toast');t.textContent=m;t.classList.remove
 function ago(ts){const s=(Date.now()-ts)/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
 
 const STATE={loc:null,data:null,map:null,spotLayer:null,curatedLayer:null,userMarker:null,lastSpotsKey:null,
-  units:{wind:'kmh'}, region:'All', spotQuery:'', view:'dashboard', sheetOpen:false, themePref:'auto', vendor:'metno', tideView:'48h'};
+  units:{wind:'kmh'}, region:'All', spotQuery:'', view:'dashboard', sheetOpen:false, themePref:'auto', vendor:'metno', tideView:'48h',
+  tideDebug:null, tidePending:false};
 
 /* ============== persistence ============== */
 const LS={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d;}catch(_){return d;}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(_){}}};
@@ -918,12 +919,38 @@ async function turtleTideExtrema(lat,lon){
   return extremaValid(ev)?{extrema:ev,source:'TideTurtle'}:null;
 }
 /* MODULE 3 chain — each source individually bounded so a slow one can't starve the next.
-   Fixes harbour/coastal spots (e.g. Newcastle, Wollongong) where Open-Meteo has no grid data:
-   it now fails fast and BOM/austides gets a fair shot before the offline engine. */
+   ROOT-CAUSE FIX (v2.6): harbour/estuary spots (Newcastle, Wollongong, Swansea, Lake Mac)
+   have NO usable Open-Meteo Marine cell (8 km ocean-only grid — "unreliable inland" per
+   Open-Meteo docs), so the only real source for them is BOM via austides. Previously austides
+   got an 11 s wrapper, but its COLD path = station-list fetch (≤8 s) + 3 date fetches (≤8 s)
+   ≈ 16 s, so the authoritative source was aborted before it could answer → engine fallback.
+   Now: station list is pre-warmed at boot, austides gets a realistic 15 s, and every attempt
+   is recorded into STATE.tideDebug (honest fallbackReason, no silent failure). */
+function _tideDbgInit(){return{tideApiAttempted:true,provider:null,tideApiUrl:null,tideApiHttpStatus:null,tideApiDurationMs:null,tideApiError:null,tideApiRawSummary:null,parsedTideEventsCount:0,fallbackReason:null};}
+function _tideDbgMerge(p){STATE.tideDebug=Object.assign({},STATE.tideDebug||{},p);}
 async function getTides(lat,lon){
-  try{const o=await withTimeout(omTideExtrema(lat,lon),7000);if(o&&extremaValid(o.extrema))return o;}catch(_){}
-  try{const a=await withTimeout(ausTideExtrema(lat,lon),11000);if(a&&extremaValid(a.extrema))return a;}catch(_){}
-  try{const t=await withTimeout(turtleTideExtrema(lat,lon),6000);if(t&&extremaValid(t.extrema))return t;}catch(_){}
+  const dbg=_tideDbgInit();
+  const providers=[
+    {name:'Open-Meteo Marine',url:omTideUrl(lat,lon),run:()=>withTimeout(omTideExtrema(lat,lon),6500)},
+    {name:'BOM (austides)',url:'https://austides.vercel.app/v1/stations/{nearest}/tides?date={today..+2}',run:()=>withTimeout(ausTideExtrema(lat,lon),15000)},
+    {name:'TideTurtle',url:'https://tideturtle.com/api/v1/tides?lat='+lat.toFixed(4)+'&lon='+lon.toFixed(4),run:()=>withTimeout(turtleTideExtrema(lat,lon),7000)}
+  ];
+  for(const p of providers){
+    const t0=Date.now();
+    try{
+      const r=await p.run();
+      const ms=Date.now()-t0;
+      if(r&&extremaValid(r.extrema)){
+        _tideDbgMerge({provider:r.source||p.name,tideApiUrl:p.url,tideApiHttpStatus:'ok',tideApiDurationMs:ms,parsedTideEventsCount:r.extrema.length,tideApiRawSummary:r.extrema.length+' extrema · first '+(r.extrema[0]?r.extrema[0].type+' '+(r.extrema[0].h!=null?r.extrema[0].h.toFixed(2)+'m':''):'?'),fallbackReason:null});
+        return r;
+      }
+      Object.assign(dbg,{tideApiUrl:p.url,tideApiDurationMs:ms,tideApiHttpStatus:'no-usable-data',fallbackReason:p.name+': no usable tide events (no station coverage or empty gridded cell)'});
+    }catch(e){
+      Object.assign(dbg,{tideApiUrl:p.url,tideApiDurationMs:Date.now()-t0,tideApiHttpStatus:'error',tideApiError:p.name+': '+((e&&e.message)||e),fallbackReason:p.name+' threw'});
+    }
+  }
+  if(!dbg.fallbackReason)dbg.fallbackReason='No live tide source returned data for this location';
+  _tideDbgMerge(dbg);
   return null;
 }
 /* ===== MODULE 4: SWELL / sea temp (optional) ===== */
@@ -1060,10 +1087,13 @@ function render(d,stale){
   if(ds){const st=d.status||{};const wx=d.weatherKnown!==false;
     const chip=(label,ok,note,warn)=>'<span class="chip rounded-full px-2 py-0.5 text-[10px] border '+(ok?'border-brand/40 text-brand':warn?'border-warn/40 text-warn':'border-danger/40 text-danger')+'">'+(ok?'✓':warn?'⚙':'✕')+' '+label+(note?' · '+esc(note):'')+'</span>';
     const tideLive=st.tide&&st.tide!=='engine';
+    const tideChip=(STATE.tidePending&&!tideLive)
+      ? '<span class="chip rounded-full px-2 py-0.5 text-[10px] border border-line text-muted pulse">… Tides · checking live</span>'
+      : chip('Tides',tideLive,tideLive?String(st.tide).replace(' (cached)',''):'on-device engine',!tideLive);
     ds.innerHTML=
       chip('Weather',wx,wx?(d.src||'').replace(' (backup)',''):'estimate',!wx)+
       chip('Wind',wx,wx?'':'estimate',!wx)+
-      chip('Tides',tideLive,tideLive?String(st.tide).replace(' (cached)',''):'on-device engine',!tideLive)+
+      tideChip+
       chip('Swell',!!st.swell,st.swell?'':'no data',!st.swell);
   }
 
@@ -1300,13 +1330,13 @@ function renderSpotsList(){
   if(!list.length){$('#spotsList').innerHTML='<div class="glass border border-line rounded-2xl p-6 text-center text-muted fade-in"><div class="text-2xl mb-1">🎣</div><div class="text-[13px]">No spots match'+(q?(' “'+esc(STATE.spotQuery.trim())+'”'):'')+'.</div><div class="text-[12px] mt-1">Try another species or region, or clear the search.</div></div>';return;}
   $('#spotsList').innerHTML=list.map(s=>{const meta=SPOT_TYPE_META[s.t]||{e:'📍',c:'#7c8aa5'};
     return '<div class="glass border border-line rounded-2xl p-3.5 fade-in"><div class="flex items-start gap-3"><div class="text-2xl shrink-0">'+meta.e+'</div><div class="flex-1 min-w-0"><div class="flex items-center justify-between gap-2"><span class="font-bold text-[14px]">'+esc(s.n)+'</span>'+(s.dist!=null?'<span class="text-[11px] text-muted shrink-0">'+round(s.dist,1)+' km</span>':'')+'</div><div class="text-[11px] text-muted">'+esc(s.r)+'</div><div class="mt-1.5 flex flex-wrap gap-1">'+spotBadges(s)+s.sp.slice(0,5).map(x=>'<span class="chip rounded-full px-1.5 py-0.5 text-[10px]">'+esc(x)+'</span>').join('')+'</div><div class="text-[12px] text-muted mt-2 leading-relaxed">'+esc(s.why)+'</div><div class="mt-2 flex items-start gap-1.5"><span class="text-[11px] shrink-0 mt-0.5">🪱</span><div class="text-[11px] text-muted"><span class="text-white font-medium">Top baits:</span> '+esc(spotBaits(s).join(', '))+'</div></div><button class="mt-2.5 chip rounded-lg px-3 py-1.5 text-[12px] font-medium text-brand active:scale-95 transition" data-loadspot="'+s.lat+','+s.lon+'" data-name="'+esc(s.n)+'">Load conditions here →</button></div></div></div>';}).join('');
-  $$('#spotsList [data-loadspot]').forEach(b=>b.addEventListener('click',()=>{const[la,lo]=b.dataset.loadspot.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:''});switchTab('dashboard');toast('Loaded '+b.dataset.name);}));
+  $$('#spotsList [data-loadspot]').forEach(b=>b.addEventListener('click',()=>{const[la,lo]=b.dataset.loadspot.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:'',source:'curated-spot'});switchTab('dashboard');toast('Loaded '+b.dataset.name);}));
 }
 function renderNearSpots(){
   if(!STATE.loc){$('#nearSpots').innerHTML='<div class="text-[12px] text-muted">Set a location to see nearby curated spots.</div>';return;}
   const list=SPOTS.map(s=>({...s,dist:spotDist(s)})).sort((a,b)=>a.dist-b.dist).slice(0,3);
   $('#nearSpots').innerHTML=list.map(s=>{const meta=SPOT_TYPE_META[s.t]||{e:'📍'};return '<button class="w-full text-left flex items-center gap-3 chip rounded-xl p-2.5 active:scale-[.99] transition" data-loadspot="'+s.lat+','+s.lon+'" data-name="'+esc(s.n)+'"><div class="text-xl shrink-0">'+meta.e+'</div><div class="flex-1 min-w-0"><div class="flex items-center justify-between gap-2"><span class="font-semibold text-[13px] truncate">'+esc(s.n)+'</span><span class="text-[11px] text-muted shrink-0">'+round(s.dist,1)+' km</span></div><div class="text-[11px] text-muted truncate">'+spotBadges(s).replace(/<[^>]+>/g,'').trim()+s.sp.slice(0,3).join(', ')+'</div></div></button>';}).join('');
-  $$('#nearSpots [data-loadspot]').forEach(b=>b.addEventListener('click',()=>{const[la,lo]=b.dataset.loadspot.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:''});toast('Loaded '+b.dataset.name);}));
+  $$('#nearSpots [data-loadspot]').forEach(b=>b.addEventListener('click',()=>{const[la,lo]=b.dataset.loadspot.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:'',source:'curated-spot'});toast('Loaded '+b.dataset.name);}));
 }
 
 /* ============== CATCH LOG ============== */
@@ -1365,7 +1395,7 @@ function renderFav(){
   const icon=$('#favIcon');if(STATE.loc&&isSaved(STATE.loc)){icon.setAttribute('fill','#34d399');icon.classList.add('text-brand');icon.classList.remove('text-muted');}else{icon.setAttribute('fill','none');icon.classList.remove('text-brand');icon.classList.add('text-muted');}
   const saved=getSaved();
   $('#favChips').innerHTML=saved.length?saved.map(s=>'<button class="chip rounded-full pl-3 pr-2 py-1 text-[12px] whitespace-nowrap flex items-center gap-1" data-fav="'+s.lat+','+s.lon+'" data-name="'+esc(s.name)+'">⭐ '+esc(s.name)+' <span class="text-muted" data-rmfav="'+s.lat+','+s.lon+'">×</span></button>').join(''):'';
-  $$('#favChips [data-fav]').forEach(b=>b.addEventListener('click',e=>{if(e.target.dataset.rmfav){let s=getSaved();const[la,lo]=e.target.dataset.rmfav.split(',').map(Number);setSaved(s.filter(x=>!(x.lat===la&&x.lon===lo)));renderFav();return;}const[la,lo]=b.dataset.fav.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:''});switchTab('dashboard');}));
+  $$('#favChips [data-fav]').forEach(b=>b.addEventListener('click',e=>{if(e.target.dataset.rmfav){let s=getSaved();const[la,lo]=e.target.dataset.rmfav.split(',').map(Number);setSaved(s.filter(x=>!(x.lat===la&&x.lon===lo)));renderFav();return;}const[la,lo]=b.dataset.fav.split(',').map(Number);loadLocation({name:b.dataset.name,lat:la,lon:lo,admin:'',source:'favourite'});switchTab('dashboard');}));
 }
 
 /* ============== LOAD ============== */
@@ -1380,9 +1410,16 @@ function lastKnownConditions(){let best=null;try{for(let i=0;i<localStorage.leng
 function tideCacheKey(lat,lon){return 'fishos_tide_'+round(lat,2)+'_'+round(lon,2);}
 function cachedTideRes(lat,lon){const c=LS.get(tideCacheKey(lat,lon),null);return (c&&c.extrema&&(Date.now()-c.at)<5*86400000)?{extrema:c.extrema,source:c.source+' (cached)'}:null;}
 function statusFor(d,swellOk){return {weather:true,wind:true,tide:d.tide.real?(d.tide.source||'live'):'engine',swell:!!swellOk};}
+/* While the live tide API is being attempted, the tide chips read "checking live…" rather than
+   prematurely claiming the on-device engine. Phase 2 replaces this with the real source. */
+function markTideChecking(){
+  const sc=$('#tideSrcChip');if(sc){sc.textContent='checking live…';sc.className='chip rounded-full px-2 py-0.5 text-[10px] border border-line text-muted pulse';}
+  const cc=$('#tideConfChip');if(cc){cc.textContent='…';cc.className='chip rounded-full px-2 py-0.5 text-[10px] border border-line text-muted';}
+}
 let _loadSeq=0;
 async function loadLocation(loc){
   const seq=++_loadSeq; // guard against out-of-order responses
+  if(!loc.source)loc.source='unknown'; // GPS / search / favourite / curated-spot / default
   STATE.loc=loc;$('#locName').textContent=loc.name;$('#speciesLoc').textContent=loc.name;renderFav();renderNearSpots();
   const cached=LS.get(condKey(loc),null);
   if(cached)render(cached,true);
@@ -1401,19 +1438,38 @@ async function loadLocation(loc){
     $('#scoreNum').textContent='–';$('#scoreLabel').textContent='No live data available';$('#scoreSub').textContent='Offline — pull to refresh when you have signal';$('#scoreFactors').innerHTML='<button id="retryBtn2" class="chip rounded-full px-3 py-1 text-[12px] text-brand2">Retry</button>';const rb=$('#retryBtn2');if(rb)rb.addEventListener('click',()=>loadLocation(loc));return;
   }
   let tideRes=cachedTideRes(loc.lat,loc.lon); // instant heights from cache if we have them, else engine
+  // record cache state for the debug panel (keyed per location — never leaks between spots)
+  const _ck=tideCacheKey(loc.lat,loc.lon),_cc=LS.get(_ck,null);
+  STATE.tideDebug={tideApiAttempted:false,selSource:loc.source||'unknown',cacheKey:_ck,cacheHit:!!tideRes,cacheAge:(_cc&&_cc.at)?ago(_cc.at):null,backupEngineUsed:false};
   let d=process(loc.lat,loc.lon,w.f,null,tideRes);d.src=w.src;d.status=statusFor(d,false);
+  // Per the requirement "never use the on-device engine before trying live": when we have no
+  // cached live tide and we're online, label the tide as "checking live…" (not "engine") while
+  // phase 2 attempts the live API. Engine values still power instant heights, but are not
+  // presented as the source until the live attempt has actually failed.
+  STATE.tidePending=(!d.tide.real && navigator.onLine);
   render(d,false);LS.set(condKey(loc),d);LS.set('fishos_lastgood',{lat:loc.lat,lon:loc.lon});saveLast(loc);
+  if(STATE.tidePending)markTideChecking();
   if(STATE.map)updateMapForLocation(loc);
 
   // ===== PHASE 2: live tides + swell in the background — upgrade when (if) they arrive =====
-  Promise.allSettled([withTimeout(getTides(loc.lat,loc.lon),24000),withTimeout(getSwell(loc.lat,loc.lon),6000)]).then(([tr,sr])=>{
-    if(seq!==_loadSeq)return;
+  // Budget bumped 24 s → 32 s so the austides cold path (om 6.5 + aus 15 + turtle 7) fits.
+  Promise.allSettled([withTimeout(getTides(loc.lat,loc.lon),32000),withTimeout(getSwell(loc.lat,loc.lon),6000)]).then(([tr,sr])=>{
+    if(seq!==_loadSeq)return; // stale response from a previous location — ignore
     const liveTide=(tr.status==='fulfilled'&&tr.value&&tr.value.extrema)?tr.value:null;
     const swell=(sr.status==='fulfilled'&&sr.value&&sr.value.current)?sr.value:null;
-    if(!liveTide&&!swell)return; // nothing better arrived — keep the fast render
+    STATE.tidePending=false; // live attempt has finished, one way or the other
+    if(STATE.debug){console.group('FishOS Tide Pipeline');console.log('location',loc.name,loc.source||'unknown',loc.lat,loc.lon);console.log('liveTide',liveTide?liveTide.source:'(none)');console.log('tideDebug',STATE.tideDebug);console.groupEnd();}
+    if(!liveTide&&!swell){
+      // Nothing better arrived. Re-render so the chip drops from "checking live…" to the
+      // honest on-device-engine state (and records why we fell back).
+      _tideDbgMerge({backupEngineUsed:STATE.data?!STATE.data.tide.real:true});
+      if(STATE.data)render(STATE.data,false);
+      return;
+    }
     if(liveTide){tideRes=liveTide;LS.set(tideCacheKey(loc.lat,loc.lon),{extrema:liveTide.extrema,source:liveTide.source,at:Date.now()});}
     const m=swell?{current:swell.current}:null;
     let d2=process(loc.lat,loc.lon,w.f,m,tideRes);d2.src=w.src;d2.status=statusFor(d2,!!swell);
+    _tideDbgMerge({backupEngineUsed:!d2.tide.real});
     render(d2,false);LS.set(condKey(loc),d2);
   });
 }
@@ -1427,7 +1483,7 @@ function bindSearch(){
   inp.addEventListener('input',()=>{const q=inp.value.trim();clr.classList.toggle('hidden',!q);clearTimeout(searchTimer);if(q.length<2){sug.classList.add('hidden');return;}
     searchTimer=setTimeout(async()=>{const res=await geocode(q);if(!res.length){sug.innerHTML='<div class="px-3 py-2.5 text-[13px] text-muted">No matches in Australia</div>';sug.classList.remove('hidden');return;}
       sug.innerHTML=res.map((r,i)=>'<button data-i="'+i+'" class="w-full text-left px-3 py-2.5 hover:bg-panel2 transition flex items-center gap-2 border-b border-line last:border-0"><svg class="w-4 h-4 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.5-7-11a7 7 0 0114 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="text-[13px]">'+esc(r.name)+'</span></button>').join('');sug.classList.remove('hidden');
-      $$('#suggest button').forEach(b=>b.addEventListener('click',()=>{const r=res[+b.dataset.i];inp.value=r.name;sug.classList.add('hidden');clr.classList.add('hidden');loadLocation(r);switchTab('dashboard');}));},280);});
+      $$('#suggest button').forEach(b=>b.addEventListener('click',()=>{const r=res[+b.dataset.i];inp.value=r.name;sug.classList.add('hidden');clr.classList.add('hidden');loadLocation({...r,source:'search'});switchTab('dashboard');}));},280);});
   clr.addEventListener('click',()=>{inp.value='';clr.classList.add('hidden');sug.classList.add('hidden');});
   document.addEventListener('click',e=>{if(!e.target.closest('#suggest')&&!e.target.closest('#search'))sug.classList.add('hidden');});
 }
@@ -1436,7 +1492,7 @@ function useGPS(){
   toast('Getting your location…');$('#gpsBtn').classList.add('pulse');
   navigator.geolocation.getCurrentPosition(async pos=>{$('#gpsBtn').classList.remove('pulse');const lat=pos.coords.latitude,lon=pos.coords.longitude;let name='My Location';
     try{const r=await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+lat+'&lon='+lon+'&zoom=12');if(r.ok){const j=await r.json();const a=j.address||{};name=(a.suburb||a.town||a.city||a.village||a.hamlet||a.county||'My Location')+(a.state?(', '+a.state):'');}}catch(_){}
-    loadLocation({name,lat,lon,admin:''});switchTab('dashboard');},
+    loadLocation({name,lat,lon,admin:'',source:'gps'});switchTab('dashboard');},
     err=>{$('#gpsBtn').classList.remove('pulse');toast(err.code===1?'Location permission denied':'Could not get GPS fix');},{enableHighAccuracy:true,timeout:9000,maximumAge:60000});
 }
 
@@ -1558,6 +1614,31 @@ async function openDebug(){
       +row('Moon',d.moon.phase+' '+d.moon.illumPct+'%',tag('live'))
       +row('Solunar strength',(dbg.solScore!=null?dbg.solScore:'?'),tag('live'))
       +'</div>';
+    // ---- Tide pipeline (live-API attempt) — the panel the bug report asked for ----
+    const td=STATE.tideDebug||{};
+    h+='<div class="chip rounded-xl p-3 mb-2"><div class="font-semibold text-[13px] mb-1">Tide pipeline (live attempt)</div>'
+      +row('selectedLocation.name',esc(loc?loc.name:'?'),'')
+      +row('selectedLocation.lat',(loc?round(loc.lat,4):'?'),'')
+      +row('selectedLocation.lon',(loc?round(loc.lon,4):'?'),'')
+      +row('selectedLocation.source',esc((loc&&loc.source)||td.selSource||'?'),'')
+      +row('tideApiAttempted',td.tideApiAttempted?'true':'false',tag(td.tideApiAttempted?'live':'failed'))
+      +row('tideApiUrl',esc(td.tideApiUrl||'—'),'')
+      +row('tideApiHttpStatus',esc(td.tideApiHttpStatus!=null?String(td.tideApiHttpStatus):'—'),'')
+      +row('tideApiDurationMs',(td.tideApiDurationMs!=null?td.tideApiDurationMs:'—'),'')
+      +row('tideApiError',esc(td.tideApiError||'none'),'')
+      +row('tideApiRawSummary',esc(td.tideApiRawSummary||'—'),'')
+      +row('parsedTideEventsCount',(td.parsedTideEventsCount!=null?td.parsedTideEventsCount:'—'),'')
+      +row('nextHigh',d.tide.nextHigh?(fmtTime(new Date(d.tide.nextHigh.t))+' '+fh(d.tide.nextHigh.h)):'—','')
+      +row('nextLow',d.tide.nextLow?(fmtTime(new Date(d.tide.nextLow.t))+' '+fh(d.tide.nextLow.h)):'—','')
+      +row('currentTideState',esc(d.tide.state),'')
+      +row('tideSourceChosen',esc(d.tide.source||'?'),tag(tideTag))
+      +row('fallbackReason',esc(td.fallbackReason||'none (live data used)'),'')
+      +row('cacheKey',esc(td.cacheKey||'?'),'')
+      +row('cacheHit',td.cacheHit?'true':'false',tag(td.cacheHit?'cache':'failed'))
+      +row('cacheAge',esc(td.cacheAge||'—'),'')
+      +row('backupEngineUsed',(!d.tide.real)?'true':'false',tag((!d.tide.real)?'engine':'live'))
+      +row('scorecardTideInput',esc(d.tide.state)+' / '+(d.tide.curHeight!=null?fh(d.tide.curHeight):'n/a'),'')
+      +'</div>';
     h+='<div class="chip rounded-xl p-3 mb-2"><div class="font-semibold text-[13px] mb-1">Score I/O</div>'
       +row('Score (output)','<b>'+d.score+'</b> '+esc(scoreWord(d.score)),'')
       +row('Base',dbg.baseScore!=null?dbg.baseScore:50,'')
@@ -1678,9 +1759,12 @@ function boot(){
   if(window.matchMedia){const mq=window.matchMedia('(prefers-color-scheme: light)');const h=()=>{if(STATE.themePref==='auto')applyTheme();};mq.addEventListener?mq.addEventListener('change',h):mq.addListener&&mq.addListener(h);}
   const last=getLast();
   if(last&&last.lat)loadLocation(last);
-  else{loadLocation({name:'Sydney, NSW',lat:-33.8688,lon:151.2093,admin:'New South Wales'});
+  else{loadLocation({name:'Sydney, NSW',lat:-33.8688,lon:151.2093,admin:'New South Wales',source:'default'});
     if(navigator.geolocation)navigator.geolocation.getCurrentPosition(pos=>{loadLocation({name:'My Location',lat:pos.coords.latitude,lon:pos.coords.longitude,admin:''});},()=>{},{timeout:6000,maximumAge:300000});}
   maybeOnboard();
+  // Pre-warm the BOM (austides) station list so the FIRST harbour/estuary search (Newcastle,
+  // Wollongong, Swansea, Lake Mac) doesn't pay the station-list fetch inside its tide budget.
+  setTimeout(()=>{if(navigator.onLine){try{ausStations();}catch(_){}}},1500);
   setInterval(()=>{if(STATE.loc&&STATE.view==='dashboard')loadLocation(STATE.loc);},15*60000); // two-phase refresh
 }
 document.addEventListener('DOMContentLoaded',boot);
