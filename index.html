@@ -878,8 +878,8 @@ function tideOk(j){return !!(j&&j.hourly&&j.hourly.sea_level_height_msl&&j.hourl
 function extremaValid(ev){return Array.isArray(ev)&&ev.length>=2&&ev.every(e=>e&&(e.type==='High'||e.type==='Low')&&isFinite(e.t)&&isFinite(e.h)&&Math.abs(e.h)<15);}
 /* --- Open-Meteo Marine hourly sea-level → extrema (cell_selection=sea + ocean nudge) --- */
 async function omTideExtrema(lat,lon){
-  let j=await fetchJSON(omTideUrl(lat,lon),null,1,7000);
-  if(!tideOk(j)){for(const [dla,dlo] of [[0,0.08],[0.06,0.08]]){j=await fetchJSON(omTideUrl(lat+dla,lon+dlo),null,1,6000);if(tideOk(j))break;}}
+  let j=await fetchJSON(omTideUrl(lat,lon),null,1,5500);
+  if(!tideOk(j))j=await fetchJSON(omTideUrl(lat,lon+0.08),null,1,4000); // single quick ocean nudge, then let BOM take over
   if(!tideOk(j))return null;
   const ev=extremaFromHourly(j.hourly.time,j.hourly.sea_level_height_msl);
   return extremaValid(ev)?{extrema:ev,source:'Open-Meteo'}:null;
@@ -888,11 +888,14 @@ async function omTideExtrema(lat,lon){
 let _ausStations=null;
 async function ausStations(){
   if(_ausStations!==null)return _ausStations;
+  const cs=LS.get('fishos_aus_stations',null); // persist the station list — saves ~8s on the next harbour spot
+  if(cs&&Array.isArray(cs.list)&&cs.list.length&&(Date.now()-cs.at)<30*86400000){_ausStations=cs.list;return _ausStations;}
   const j=await fetchJSON('https://austides.vercel.app/v1/stations',null,1,8000);
   let arr=Array.isArray(j)?j:(j&&(j.data||j.stations||j.results));
   if(!Array.isArray(arr)){_ausStations=false;return false;}
   _ausStations=arr.map(s=>({id:s.id||s.station_id||s.slug,lat:+(s.lat!=null?s.lat:s.latitude),lon:+(s.lon!=null?s.lon:(s.lng!=null?s.lng:s.longitude)),name:s.name})).filter(s=>s.id&&isFinite(s.lat)&&isFinite(s.lon));
-  if(!_ausStations.length)_ausStations=false;
+  if(!_ausStations.length){_ausStations=false;return false;}
+  LS.set('fishos_aus_stations',{list:_ausStations,at:Date.now()});
   return _ausStations;
 }
 async function ausTideExtrema(lat,lon){
@@ -914,11 +917,13 @@ async function turtleTideExtrema(lat,lon){
   const ev=cand.map(e=>{const t=Date.parse(e.time||e.dt||e.timestamp||e.date||e.t);const h=+(e.height!=null?e.height:(e.height_m!=null?e.height_m:(e.value!=null?e.value:e.h)));const ty=/h/i.test(e.type||e.state||e.kind||'')?'High':(/l/i.test(e.type||e.state||e.kind||'')?'Low':null);return(isFinite(t)&&isFinite(h)&&ty)?{type:ty,t,h}:null;}).filter(Boolean);
   return extremaValid(ev)?{extrema:ev,source:'TideTurtle'}:null;
 }
-/* MODULE 3 chain — returns {extrema,source} or null (caller uses the offline engine if null) */
+/* MODULE 3 chain — each source individually bounded so a slow one can't starve the next.
+   Fixes harbour/coastal spots (e.g. Newcastle, Wollongong) where Open-Meteo has no grid data:
+   it now fails fast and BOM/austides gets a fair shot before the offline engine. */
 async function getTides(lat,lon){
-  try{const o=await omTideExtrema(lat,lon);if(o)return o;}catch(_){}
-  try{const a=await ausTideExtrema(lat,lon);if(a)return a;}catch(_){}
-  try{const t=await turtleTideExtrema(lat,lon);if(t)return t;}catch(_){}
+  try{const o=await withTimeout(omTideExtrema(lat,lon),7000);if(o&&extremaValid(o.extrema))return o;}catch(_){}
+  try{const a=await withTimeout(ausTideExtrema(lat,lon),11000);if(a&&extremaValid(a.extrema))return a;}catch(_){}
+  try{const t=await withTimeout(turtleTideExtrema(lat,lon),6000);if(t&&extremaValid(t.extrema))return t;}catch(_){}
   return null;
 }
 /* ===== MODULE 4: SWELL / sea temp (optional) ===== */
@@ -1197,8 +1202,15 @@ function renderTide48(d){
   // Now / Next summary
   const nn=$('#tideNowNext');
   if(nn){const future=[t.nextHigh,t.nextLow].filter(Boolean).sort((a,b)=>a.t-b.t);const nxt=future[0]||t.next;
-    nn.innerHTML='<div class="chip rounded-xl p-2.5"><div class="text-[10px] uppercase tracking-wider text-muted">Now</div><div class="font-bold text-[15px]">'+esc(t.state)+(t.curHeight!=null?' <span class="text-[12px] text-muted font-normal">'+fh(t.curHeight)+'</span>':'')+'</div></div>'
-      +'<div class="chip rounded-xl p-2.5"><div class="text-[10px] uppercase tracking-wider text-muted">Next</div><div class="font-bold text-[15px]">'+(nxt?(esc(nxt.type||t.nextType)+' '+fmtTime(new Date(nxt.t))+(nxt.h!=null?' <span class="text-[12px] text-muted font-normal">'+fh(nxt.h)+'</span>':'')):'—')+'</div></div>';
+    // today's tide range + spring/neap (tides4fishing-style "coefficient")
+    const dayEv=(t.events7d||t.events48||[]).filter(e=>e.t>=d.now-12*3600000&&e.t<=d.now+18*3600000);
+    let rangeM=null;if(dayEv.length>=2){const hs=dayEv.map(e=>e.h);rangeM=Math.max(...hs)-Math.min(...hs);}
+    const sn=rangeM==null?'':(rangeM>=1.15?'Springs':rangeM<=0.85?'Neaps':'Mid-range');
+    // countdown to next tide (Tides Near Me style)
+    const mins=nxt?Math.round((nxt.t-d.now)/60000):null;
+    const cd=(mins!=null&&mins>0)?('in '+(mins>=60?(Math.floor(mins/60)+'h '+(mins%60)+'m'):(mins+'m'))):'';
+    nn.innerHTML='<div class="chip rounded-xl p-2.5"><div class="text-[10px] uppercase tracking-wider text-muted">Now</div><div class="font-bold text-[15px]">'+esc(t.state)+(t.curHeight!=null?' <span class="text-[12px] text-muted font-normal">'+fh(t.curHeight)+'</span>':'')+'</div>'+(sn?'<div class="text-[10px] text-muted mt-0.5">'+sn+(rangeM!=null?' · '+rangeM.toFixed(1)+' m range':'')+'</div>':'')+'</div>'
+      +'<div class="chip rounded-xl p-2.5"><div class="text-[10px] uppercase tracking-wider text-muted">Next</div><div class="font-bold text-[15px]">'+(nxt?(esc(nxt.type||t.nextType)+' '+fmtTime(new Date(nxt.t))+(nxt.h!=null?' <span class="text-[12px] text-muted font-normal">'+fh(nxt.h)+'</span>':'')):'—')+'</div>'+(cd?'<div class="text-[10px] text-muted mt-0.5">'+cd+'</div>':'')+'</div>';
   }
   // 48h / 7-day toggle state
   const v=STATE.tideView==='7d'?'7d':'48h',b48=$('#tideView48'),b7=$('#tideView7');
@@ -1212,8 +1224,21 @@ function renderTide48(d){
   else{
     const todayKey=new Date(d.now).toDateString(),tomKey=new Date(d.now+86400000).toDateString(),groups={},order=[];
     ev.forEach(e=>{const k=new Date(e.t).toDateString();if(!groups[k]){groups[k]=[];order.push(k);}groups[k].push(e);});
-    host.innerHTML=order.map(k=>{const lbl=k===todayKey?'Today':k===tomKey?'Tomorrow':new Date(k).toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
-      return '<div class="mb-2.5"><div class="text-[11px] uppercase tracking-wider text-muted mb-1">'+lbl+'</div><div class="grid grid-cols-2 gap-1.5">'+groups[k].map(e=>{const up=e.type==='High',col=up?'text-brand':'text-warn';const ht=' · '+(e.h>=0?'+':'')+e.h.toFixed(2)+' m';return '<div class="chip rounded-lg px-2.5 py-1.5 flex items-center gap-2"><span class="'+col+' text-sm leading-none">'+(up?'▲':'▼')+'</span><div class="min-w-0"><div class="text-[13px] font-semibold leading-none">'+(up?'High':'Low')+'</div><div class="text-[11px] text-muted mt-0.5 truncate">'+fmtTime(new Date(e.t))+ht+'</div></div></div>';}).join('')+'</div></div>';}).join('');
+    const sun={};(d.daily||[]).forEach(dd=>{if(dd&&dd.date)sun[new Date(dd.date).toDateString()]={sr:dd.sunrise,ss:dd.sunset};});
+    // tidetime/WillyWeather-style: per-day card → header (date + sunrise/sunset) → State · Time · Height rows
+    host.innerHTML=order.map(k=>{
+      const lbl=k===todayKey?'Today':k===tomKey?'Tomorrow':new Date(k).toLocaleDateString('en-AU',{weekday:'long'});
+      const dstr=new Date(k).toLocaleDateString('en-AU',{day:'numeric',month:'short'});
+      const s=sun[k];
+      const head='<div class="flex items-baseline justify-between mb-1.5"><div class="font-semibold text-[13px]">'+lbl+' <span class="text-muted font-normal text-[11px]">'+dstr+'</span></div>'+(s&&s.sr&&s.ss?'<div class="text-[10px] text-muted">☀ '+fmtTime(new Date(s.sr))+' · 🌇 '+fmtTime(new Date(s.ss))+'</div>':'')+'</div>';
+      const rows=groups[k].map(e=>{const up=e.type==='High';
+        return '<div class="flex items-center gap-2 py-1.5 border-b border-line last:border-0">'
+          +'<div class="w-14 flex items-center gap-1.5 shrink-0"><span class="'+(up?'text-brand':'text-warn')+' text-[13px] leading-none">'+(up?'▲':'▼')+'</span><span class="text-[12px] font-medium">'+(up?'High':'Low')+'</span></div>'
+          +'<div class="flex-1 text-brand2 font-semibold text-[15px]">'+fmtTime(new Date(e.t))+'</div>'
+          +'<div class="text-[13px] text-right tabular-nums w-16">'+(e.h>=0?'+':'')+e.h.toFixed(2)+' m</div>'
+        +'</div>';}).join('');
+      return '<div class="chip rounded-xl px-3 py-2.5 mb-2">'+head+rows+'</div>';
+    }).join('');
   }
   // coverage note when 7-day asked but live source covers fewer days
   let cov='';
@@ -1231,24 +1256,25 @@ const SPOT_TYPE_META={rock:{e:'⛰️',c:'#f472b6'},jetty:{e:'🎣',c:'#34d399'}
 function haversine(la1,lo1,la2,lo2){const R=6371,toR=Math.PI/180;const dLa=(la2-la1)*toR,dLo=(lo2-lo1)*toR;const a=Math.sin(dLa/2)**2+Math.cos(la1*toR)*Math.cos(la2*toR)*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(a));}
 function spotDist(s){if(!STATE.loc)return null;return haversine(STATE.loc.lat,STATE.loc.lon,s.lat,s.lon);}
 function spotBadges(s){let b='';if(s.feat==='thermal')b+='<span class="chip border border-thermal/50 text-thermal rounded-full px-1.5 py-0.5 text-[10px]">🔥 warm water</span> ';if(s.feat==='current')b+='<span class="chip border border-brand2/50 text-brand2 rounded-full px-1.5 py-0.5 text-[10px]">🌊 pressure</span> ';return b;}
-/* NSW go-to baits & lures by species (east-coast staples — pilchards, squid, prawns, worms, nippers). */
+/* NSW go-to baits & lures by species — local research: live/fresh > frozen; pump your own nippers,
+   catch fresh squid & yakkas on-site, raw Hawkesbury prawns over supermarket, chicken breast for bream. */
 const NSW_BAITS={
-  Bream:['Peeled prawn','Live nippers','Mullet strip','Bread'],
-  Flathead:['Pilchard','Whitebait','Soft plastics','Live poddy mullet'],
-  Whiting:['Live beach worms','Blood worms','Pipis','Nippers'],
-  Jewfish:['Live mullet','Squid','Fresh fish fillet','Soft vibes'],
-  Mulloway:['Live tailor','Whole squid','Squid head','Live mullet'],
-  Tailor:['Pilchard (ganged)','Garfish','Metal slugs'],
-  Salmon:['Metal slugs','Pilchard','Surface poppers'],
-  Snapper:['Whole squid','Pilchard','Soft plastics','Slimy mackerel'],
-  Trevally:['Peeled prawn','Cut pilchard','Soft plastics'],
-  Kingfish:['Live squid','Live yakkas','Knife jigs','Whole squid'],
+  Bream:['Live nippers (ghost shrimp)','Raw Hawkesbury prawns','Peeled prawn','Chicken breast cubes','Mullet strip','Pilchard cubes','Bread'],
+  Flathead:['Live nippers','Pilchard','Whitebait','Live poddy mullet','Z-Man 2.5" Slim SwimZ (Motor Oil)','Soft plastic jerk shad'],
+  Whiting:['Live beach worms','Blood worms','Live nippers','Pipis','Squirt worms','Surface popper'],
+  Jewfish:['Fresh squid (whole/strips)','Live yakkas','Live mullet','Squid head','Fresh fish fillet','Soft vibe'],
+  Mulloway:['Live tailor','Fresh squid (whole)','Squid head','Live mullet','Large soft plastic'],
+  Tailor:['Pilchard (ganged)','Garfish','Whitebait','Metal slugs','White popper'],
+  Salmon:['Pilchard (ganged)','Metal slugs','Whitebait','Surface popper'],
+  Snapper:['Whole pilchard','Fresh squid','Slimy mackerel','Octopus','5–7" soft plastic'],
+  Trevally:['Raw Hawkesbury prawns','Peeled prawn','Chicken breast cubes','Cut pilchard','Ecogear VX blade','Soft plastic'],
+  Kingfish:['Fresh squid (live/strips)','Live yakkas (yellowtail scad)','Live garfish','Knife/speed jig','Stickbait'],
   Bonito:['Metal slugs','Small white lures','Live yakkas'],
   Drummer:['Cunjevoi','Bread','Cabbage weed','Peeled prawn'],
-  Luderick:['Green/cabbage weed'],
-  Squid:['Squid jigs (prawn pattern)'],
-  Tarwhine:['Peeled prawn','Nippers','Bread'],
-  Bluefish:['Pilchard (ganged)','Metal slugs'],
+  Luderick:['Green weed','Cabbage weed'],
+  Squid:['Squid jig (prawn pattern)'],
+  Tarwhine:['Peeled prawn','Live nippers','Bread'],
+  Bluefish:['Pilchard (ganged)','Whitebait','Metal slugs'],
   Bass:['Surface lures','Spinnerbaits','Live worms','Small soft plastics']
 };
 function baitKeyFor(name){ // map a spot species label to a NSW_BAITS key
@@ -1380,7 +1406,7 @@ async function loadLocation(loc){
   if(STATE.map)updateMapForLocation(loc);
 
   // ===== PHASE 2: live tides + swell in the background — upgrade when (if) they arrive =====
-  Promise.allSettled([withTimeout(getTides(loc.lat,loc.lon),9000),withTimeout(getSwell(loc.lat,loc.lon),6000)]).then(([tr,sr])=>{
+  Promise.allSettled([withTimeout(getTides(loc.lat,loc.lon),24000),withTimeout(getSwell(loc.lat,loc.lon),6000)]).then(([tr,sr])=>{
     if(seq!==_loadSeq)return;
     const liveTide=(tr.status==='fulfilled'&&tr.value&&tr.value.extrema)?tr.value:null;
     const swell=(sr.status==='fulfilled'&&sr.value&&sr.value.current)?sr.value:null;
